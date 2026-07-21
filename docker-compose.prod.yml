@@ -1,0 +1,60 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskpilot-app
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - ./etc/taskpilot-api.prod.yaml:/app/etc/taskpilot-api.prod.yaml:ro
+      - taskpilot_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - taskpilot_net
+
+  postgres:
+    image: postgres:16
+    container_name: taskpilot-postgres
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      POSTGRES_DB: taskpilot
+      POSTGRES_USER: taskpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskpilot -d taskpilot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - taskpilot_net
+
+  redis:
+    image: redis:7
+    container_name: taskpilot-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - taskpilot_net
+
+networks:
+  taskpilot_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  taskpilot_uploads:

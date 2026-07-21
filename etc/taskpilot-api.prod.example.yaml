@@ -1,0 +1,16 @@
+Name: taskpilot-api
+Host: 0.0.0.0
+Port: 8888
+Mode: release
+
+Database:
+  DataSource: ""
+
+Cache:
+  Host: ""
+  Pass: ""
+  Type: "node"
+
+Auth:
+  AccessSecret: ""
+  AccessExpire: 86400

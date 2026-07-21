@@ -1,0 +1,16 @@
+Name: taskpilot-api
+Host: 0.0.0.0
+Port: 8888
+Mode: debug
+
+Database:
+  DataSource: "postgres://taskpilot:taskpilot@localhost:5432/taskpilot?sslmode=disable"
+
+Cache:
+  Host: "localhost:6379"
+  Pass: ""
+  Type: "node"
+
+Auth:
+  AccessSecret: "taskpilot-local-dev-secret-change-me"
+  AccessExpire: 86400

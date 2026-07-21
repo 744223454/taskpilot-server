@@ -1,0 +1,15 @@
+.git
+.github
+.gitignore
+.gocache
+bin
+dist
+*.log
+.DS_Store
+coverage.out
+*.coverprofile
+etc/taskpilot-api.yaml
+etc/taskpilot-api.prod.yaml
+.env
+.env.*
+uploads

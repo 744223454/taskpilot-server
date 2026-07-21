@@ -1,0 +1,29 @@
+.DS_Store
+
+# Local runtime config and secrets
+etc/taskpilot-api.yaml
+etc/taskpilot-api.prod.yaml
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# Build outputs
+bin/
+dist/
+
+# Go cache and coverage
+.gocache/
+coverage.out
+*.coverprofile
+
+# Runtime files
+*.log
+uploads/*
+!uploads/.gitkeep
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
