@@ -1,0 +1,462 @@
+openapi: 3.0.3
+info:
+  title: TaskPilot Server API
+  version: 0.1.0
+  description: |
+    TaskPilot 当前已实现接口的 OpenAPI 规范。
+
+    说明：
+    - 本文件托管在 `taskpilot-server` 仓库内，适合直接导入 Apifox 调试或通过 GitHub Raw URL 持续同步
+    - 当前已实现接口统一返回响应信封 `{ code, message, data }`
+    - 未实现的业务接口暂未写入本规范
+servers:
+  - url: http://localhost:8888
+    description: Local development server
+tags:
+  - name: System
+    description: 系统与示例接口
+  - name: Auth
+    description: 认证接口
+paths:
+  /healthz:
+    get:
+      tags:
+        - System
+      summary: 健康检查
+      description: 返回服务是否存活，以及数据库连接是否已初始化。
+      operationId: getHealthz
+      responses:
+        "200":
+          description: 健康检查成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 0
+                    message: ok
+                    data:
+                      status: ok
+                      db: true
+  /from/{name}:
+    get:
+      tags:
+        - System
+      summary: 示例接口
+      description: 返回 `hello {name}` 的示例响应。
+      operationId: getHelloFromName
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: 示例名称
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 请求成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelloEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 0
+                    message: ok
+                    data:
+                      message: hello zmk
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: 用户注册
+      description: |
+        注册新用户并签发 JWT。
+
+        实际行为：
+        - 服务端会对邮箱执行 `trim + lower`
+        - 若邮箱已存在，返回 409
+        - 成功时返回统一响应信封，`data` 为 `AuthResponse`
+      operationId: postAuthRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            examples:
+              default:
+                value:
+                  email: test@example.com
+                  password: "12345678"
+                  nickname: zmk
+      responses:
+        "201":
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+        "400":
+          description: 请求参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidRequest:
+                  value:
+                    code: 10001
+                    message: "Key: 'RegisterRequest.Email' Error:Field validation for 'Email' failed on the 'email' tag"
+                    data: null
+        "409":
+          description: 邮箱已注册
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                duplicatedEmail:
+                  value:
+                    code: 10003
+                    message: email already registered
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: 用户登录
+      description: |
+        使用邮箱和密码登录并签发 JWT。
+
+        实际行为：
+        - 服务端会对邮箱执行 `trim + lower`
+        - 邮箱不存在和密码错误统一返回 401
+      operationId: postAuthLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              default:
+                value:
+                  email: test@example.com
+                  password: "12345678"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+        "400":
+          description: 请求参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 邮箱或密码错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidCredentials:
+                  value:
+                    code: 10002
+                    message: invalid email or password
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
+  /api/v1/users/me:
+    get:
+      tags:
+        - Auth
+      summary: 获取当前用户
+      description: |
+        根据 `Authorization: Bearer <token>` 返回当前登录用户。
+
+        实际行为：
+        - `Bearer` 方案名大小写不敏感
+        - token 缺失、无效、过期，或对应用户不存在时统一返回 401
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 0
+                    message: ok
+                    data:
+                      id: 1
+                      email: test@example.com
+                      nickname: zmk
+                      avatar_url: null
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                missingBearer:
+                  value:
+                    code: 10002
+                    message: missing bearer token
+                    data: null
+                invalidAccessToken:
+                  value:
+                    code: 10002
+                    message: invalid access token
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Envelope:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: ok
+        data:
+          nullable: true
+    ErrorEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            code:
+              type: integer
+              example: 10002
+            message:
+              type: string
+              example: invalid access token
+            data:
+              nullable: true
+              example: null
+    HealthPayload:
+      type: object
+      required:
+        - status
+        - db
+      properties:
+        status:
+          type: string
+          example: ok
+        db:
+          type: boolean
+          example: true
+    HealthEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/HealthPayload"
+    HelloResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: hello zmk
+    HelloEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/HelloResponse"
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - nickname
+      properties:
+        email:
+          type: string
+          format: email
+          example: test@example.com
+        password:
+          type: string
+          minLength: 8
+          example: "12345678"
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: zmk
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: test@example.com
+        password:
+          type: string
+          minLength: 8
+          example: "12345678"
+    UserProfile:
+      type: object
+      required:
+        - id
+        - email
+        - nickname
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          format: email
+          example: test@example.com
+        nickname:
+          type: string
+          example: zmk
+        avatar_url:
+          type: string
+          nullable: true
+          example: null
+    AuthResponse:
+      type: object
+      required:
+        - user
+        - access_token
+        - expires_in_sec
+      properties:
+        user:
+          $ref: "#/components/schemas/UserProfile"
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example
+        expires_in_sec:
+          type: integer
+          format: int64
+          example: 86400
+    AuthEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AuthResponse"
+    UserProfileEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserProfile"
