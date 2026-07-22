@@ -2,8 +2,11 @@
 .github
 .gitignore
 .gocache
+.gocache/
 bin
+bin/
 dist
+dist/
 *.log
 .DS_Store
 coverage.out
@@ -13,3 +16,5 @@ etc/taskpilot-api.prod.yaml
 .env
 .env.*
 uploads
+uploads/
+api

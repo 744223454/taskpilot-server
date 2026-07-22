@@ -11,6 +11,7 @@ etc/taskpilot-api.prod.yaml
 # Build outputs
 bin/
 dist/
+api
 
 # Go cache and coverage
 .gocache/

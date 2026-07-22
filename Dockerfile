@@ -2,6 +2,12 @@ FROM golang:1.26.5-alpine AS builder
 
 WORKDIR /src
 
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64 \
+    GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn
+
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY go.mod go.sum ./
@@ -9,7 +15,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/taskpilot ./cmd/api
+RUN go build -o /out/taskpilot ./cmd/api
 
 FROM alpine:3.22
 
