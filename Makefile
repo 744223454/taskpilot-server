@@ -4,6 +4,7 @@ APP := taskpilot
 CONFIG ?= etc/taskpilot-api.yaml
 PROD_COMPOSE ?= docker-compose.prod.yml
 PROD_CONFIG ?= etc/taskpilot-api.prod.yaml
+PROD_ENV ?= .env.prod
 
 run:
 	go run ./cmd/api -f $(CONFIG)
@@ -30,13 +31,13 @@ docker-build:
 	docker build -t $(APP):local .
 
 prod-up:
-	docker compose -f $(PROD_COMPOSE) up -d --build
+	docker compose --env-file $(PROD_ENV) -f $(PROD_COMPOSE) up -d --build
 
 prod-down:
-	docker compose -f $(PROD_COMPOSE) down
+	docker compose --env-file $(PROD_ENV) -f $(PROD_COMPOSE) down
 
 migrate-prod:
-	docker compose -f $(PROD_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $$POSTGRES_USER -d $$POSTGRES_DB < scripts/migrate.sql
+	docker compose --env-file $(PROD_ENV) -f $(PROD_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $$POSTGRES_USER -d $$POSTGRES_DB < scripts/migrate.sql
 
 prod-deploy:
 	sh ./scripts/deploy_prod.sh
