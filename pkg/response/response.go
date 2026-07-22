@@ -7,7 +7,7 @@ import (
 type Envelope struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Data    interface{} `json:"data"`
 }
 
 func Success(c *gin.Context, httpStatus int, data interface{}) {

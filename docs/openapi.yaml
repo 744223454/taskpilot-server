@@ -316,7 +316,6 @@ components:
       required:
         - code
         - message
-        - data
       properties:
         code:
           type: integer
@@ -324,12 +323,12 @@ components:
         message:
           type: string
           example: ok
-        data:
-          nullable: true
     ErrorEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
+          required:
+            - data
           properties:
             code:
               type: integer
@@ -356,6 +355,8 @@ components:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
+          required:
+            - data
           properties:
             data:
               $ref: "#/components/schemas/HealthPayload"
@@ -371,6 +372,8 @@ components:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
+          required:
+            - data
           properties:
             data:
               $ref: "#/components/schemas/HelloResponse"
@@ -450,6 +453,8 @@ components:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
+          required:
+            - data
           properties:
             data:
               $ref: "#/components/schemas/AuthResponse"
@@ -457,6 +462,8 @@ components:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
+          required:
+            - data
           properties:
             data:
               $ref: "#/components/schemas/UserProfile"
