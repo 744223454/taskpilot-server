@@ -136,9 +136,9 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" '
             cd "'"$DEV_DEPLOY_PATH"'" &&
+            git restore -- scripts/deploy_dev.sh &&
             git switch dev &&
             git pull --ff-only origin dev &&
-            chmod +x scripts/deploy_dev.sh &&
-            ./scripts/deploy_dev.sh
+            sh ./scripts/deploy_dev.sh
           '
         shell: bash
