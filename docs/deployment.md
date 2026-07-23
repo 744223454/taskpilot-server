@@ -80,11 +80,9 @@ sh ./scripts/deploy_dev.sh
 
 开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的数据库初始化流程。
 
-服务器上现有开发容器和命名卷由 `taskpilot-server` 项目创建，因此部署脚本默认固定使用该项目名，以便无损接管现有资源，并避免项目名随部署目录变化。以后如需迁移到独立项目名，应先迁移或重建旧容器，再覆盖项目名：
+部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。部署时会自动删除旧 `taskpilot-server` 项目下名称包含 `taskpilot-dev-` 的开发容器以及失败重建遗留的临时容器，再由新项目重新创建；命名卷不会被删除，开发数据会保留。
 
-```bash
-COMPOSE_PROJECT_NAME=taskpilot-dev-server sh ./scripts/deploy_dev.sh
-```
+如果 `docker-compose.dev.yml` 继续复用旧项目创建的命名卷，应将这些卷声明为 `external: true`，避免 Docker Compose 输出归属警告。
 
 ## 开发服务器测试数据
 

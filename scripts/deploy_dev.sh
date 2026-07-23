@@ -17,11 +17,25 @@ if [ ! -f "$CONFIG_FILE" ]; then
 	exit 1
 fi
 
-COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-server}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-dev-server}
 
 compose() {
 	docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+remove_legacy_containers() {
+	docker ps -aq \
+		--filter "label=com.docker.compose.project=taskpilot-server" \
+		--filter "name=taskpilot-dev-" |
+	while IFS= read -r container_id; do
+		if [ -n "$container_id" ]; then
+			echo "removing legacy development container $container_id"
+			docker rm -f "$container_id"
+		fi
+	done
+}
+
 compose config --quiet
-compose up -d --build
+compose build
+remove_legacy_containers
+compose up -d
