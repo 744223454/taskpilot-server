@@ -75,15 +75,15 @@ git pull --ff-only
 ```bash
 git switch dev
 git pull --ff-only origin dev
-./scripts/deploy_dev.sh
+sh ./scripts/deploy_dev.sh
 ```
 
 开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的数据库初始化流程。
 
-部署脚本默认将 Docker Compose 项目名固定为 `taskpilot-server`，以便继续接管已有开发容器和命名卷，不受部署目录名称变化影响。如果这是全新环境，或开发与生产环境共用同一 Docker 主机且需要完全隔离，可通过环境变量设置唯一项目名，并在首次切换前迁移或移除旧容器：
+部署脚本默认将 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免项目名随部署目录变化。如果需要临时接管由旧项目名创建的容器和命名卷，可在完成迁移前覆盖项目名：
 
 ```bash
-COMPOSE_PROJECT_NAME=taskpilot-dev-server ./scripts/deploy_dev.sh
+COMPOSE_PROJECT_NAME=taskpilot-server sh ./scripts/deploy_dev.sh
 ```
 
 ## 开发服务器测试数据
