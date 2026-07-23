@@ -17,7 +17,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 	exit 1
 fi
 
-COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-dev-server}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-server}
 
 compose() {
 	docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
