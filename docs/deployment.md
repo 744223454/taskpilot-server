@@ -52,13 +52,37 @@ git pull --ff-only
 ./scripts/deploy_prod.sh
 ```
 
-如果你希望自动化部署，可以配置 `.github/workflows/ci-deploy.yml` 这个 GitHub Actions 工作流，并在仓库 Secrets 中补齐以下变量：
+`.github/workflows/ci-deploy.yml` 支持按分支自动部署：
+
+- `main` 更新并通过测试后，部署生产服务器。
+- `dev` 更新并通过测试后，部署开发服务器。
+
+首次启用开发环境自动部署时，需要先将工作流和 `scripts/deploy_dev.sh` 同步到 `dev` 分支。GitHub 只会执行当前被推送分支中已经存在的工作流。
+
+在仓库 Secrets 中补齐以下变量：
 
 - `DEPLOY_HOST`
 - `DEPLOY_PORT`
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
-- `DEPLOY_PATH`
+- `DEPLOY_PATH`：生产服务器仓库目录。
+- `DEV_DEPLOY_PATH`：开发服务器仓库目录，例如 `/www/wwwroot/dev.taskpilot.1kuansi.cn/taskpilot-dev-server`。
+
+如果两个环境位于同一台服务器，可以共用主机、端口、用户和 SSH 密钥，只分别配置两个部署目录。
+
+开发服务器需在部署目录中准备不提交到 Git 的 `.env.dev` 和 `etc/taskpilot-api.dev.yaml`。工作流会在服务器执行：
+
+```bash
+git switch dev
+git pull --ff-only origin dev
+sh ./scripts/deploy_dev.sh
+```
+
+开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的数据库初始化流程。
+
+部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。首次迁移时，如果新项目尚未完整拥有 `app` 和 `redis` 服务，脚本会自动删除名称包含 `taskpilot-dev-` 的旧开发容器以及失败重建遗留的临时容器，再由新项目重新创建；新项目完整建立后，后续部署不会重复清理正常容器。命名卷不会被删除，开发数据会保留。
+
+如果 `docker-compose.dev.yml` 继续复用旧项目创建的命名卷，应将这些卷声明为 `external: true`，避免 Docker Compose 输出归属警告。
 
 ## 开发服务器测试数据
 

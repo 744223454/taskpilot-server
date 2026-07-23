@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
       - master
   pull_request:
   workflow_dispatch:
@@ -28,7 +29,7 @@ jobs:
       - name: Run tests
         run: make test
 
-  deploy:
+  deploy-production:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
@@ -69,7 +70,7 @@ jobs:
           ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
         shell: bash
 
-      - name: Deploy on server
+      - name: Deploy on production server
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
@@ -78,8 +79,66 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" '
             cd "'"$DEPLOY_PATH"'" &&
-            git pull --ff-only &&
+            git switch main &&
+            git pull --ff-only origin main &&
             chmod +x scripts/deploy_prod.sh &&
             ./scripts/deploy_prod.sh
+          '
+        shell: bash
+
+  deploy-development:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deploy secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEV_DEPLOY_PATH: ${{ secrets.DEV_DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=0
+          for secret_name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEV_DEPLOY_PATH DEPLOY_SSH_KEY; do
+            if [ -z "${!secret_name}" ]; then
+              echo "::error::Missing required Actions secret: ${secret_name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+        shell: bash
+
+      - name: Prepare SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+        shell: bash
+
+      - name: Deploy on development server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEV_DEPLOY_PATH: ${{ secrets.DEV_DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" '
+            cd "'"$DEV_DEPLOY_PATH"'" &&
+            git restore -- scripts/deploy_dev.sh &&
+            git switch dev &&
+            git pull --ff-only origin dev &&
+            sh ./scripts/deploy_dev.sh
           '
         shell: bash
