@@ -60,6 +60,27 @@ git pull --ff-only
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
 
+## 开发服务器测试数据
+
+仅在开发服务器上执行以下脚本。脚本会重建 8 个固定邮箱的体验账号及其测试数据，不会修改其他用户的数据；重复执行可将样例恢复到初始状态。
+
+```bash
+chmod +x scripts/seed_dev_data.sh
+./scripts/seed_dev_data.sh --confirm-dev
+```
+
+默认读取 `.env.prod` 和 `docker-compose.prod.yml`。如果开发服务器使用其他文件，可在执行时覆盖：
+
+```bash
+ENV_FILE=/srv/taskpilot-server/.env.dev \
+COMPOSE_FILE=/srv/taskpilot-server/docker-compose.dev.yml \
+./scripts/seed_dev_data.sh --confirm-dev
+```
+
+脚本会在命令输出中显示 8 个测试账号和本次生成的随机共享密码。密码只显示一次，请勿将其提交到仓库。
+
+主账号包含进行中的项目、已归档项目、待确认解析结果、处理中的解析任务和失败样例；其余账号各自包含独立的文档、解析结果、项目和任务，用于验证用户数据隔离。脚本中的 PDF 路径仅用于数据库界面测试，不包含真实上传文件。
+
 ## 反向代理示例
 
 反向代理需要把你选定的子域名转发到 `http://127.0.0.1:8888`。
