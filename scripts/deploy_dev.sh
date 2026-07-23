@@ -24,12 +24,14 @@ compose() {
 }
 
 remove_legacy_containers() {
-	docker ps -aq \
-		--filter "label=com.docker.compose.project=taskpilot-server" \
-		--filter "name=taskpilot-dev-" |
+	if [ -n "$(compose ps -aq app)" ] && [ -n "$(compose ps -aq redis)" ]; then
+		return
+	fi
+
+	docker ps -aq --filter "name=taskpilot-dev-" |
 	while IFS= read -r container_id; do
 		if [ -n "$container_id" ]; then
-			echo "removing legacy development container $container_id"
+			echo "removing conflicting development container $container_id"
 			docker rm -f "$container_id"
 		fi
 	done
