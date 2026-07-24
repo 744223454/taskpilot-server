@@ -18,6 +18,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-dev-server}
+POSTGRES_CONTAINER=${POSTGRES_CONTAINER:-taskpilot-postgres}
+POSTGRES_USER=${POSTGRES_USER:-taskpilot}
+POSTGRES_DB=${POSTGRES_DB:-taskpilot_dev}
 
 compose() {
 	docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
@@ -39,10 +42,10 @@ remove_legacy_containers() {
 
 wait_for_postgres() {
 	attempts=0
-	until compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
+	until docker exec "$POSTGRES_CONTAINER" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
 		attempts=$((attempts + 1))
 		if [ "$attempts" -ge 30 ]; then
-			echo "postgres did not become ready in time"
+			echo "postgres container $POSTGRES_CONTAINER did not become ready in time"
 			exit 1
 		fi
 		sleep 2
@@ -50,15 +53,15 @@ wait_for_postgres() {
 }
 
 apply_incremental_migrations() {
-	echo "applying incremental database migrations"
-	compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+	echo "applying incremental database migrations to $POSTGRES_DB via $POSTGRES_CONTAINER"
+	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 		< "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
 }
 
 compose config --quiet
-compose build
+compose build app
 remove_legacy_containers
-compose up -d postgres redis
+compose up -d redis
 wait_for_postgres
 apply_incremental_migrations
-compose up -d
+compose up -d app
