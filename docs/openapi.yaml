@@ -1,14 +1,15 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
     说明：
     - 本文件托管在 `taskpilot-server` 仓库内，适合直接导入 Apifox 调试或通过 GitHub Raw URL 持续同步
-    - 当前已实现接口统一返回响应信封 `{ code, message, data }`
-    - 未实现的业务接口暂未写入本规范
+    - 当前已实现接口统一返回响应信封 `{ code, message, data }`，错误响应的 `data` 为 `null`
+    - 未实现的业务接口（解析结果、项目、任务、历史等）暂未写入本规范
+    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大
 servers:
   - url: http://localhost:8888
     description: Local development server
@@ -200,6 +201,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidRequest:
+                  value:
+                    code: 10001
+                    message: "Key: 'LoginRequest.Email' Error:Field validation for 'Email' failed on the 'email' tag"
+                    data: null
         "401":
           description: 邮箱或密码错误
           content:
@@ -274,12 +281,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
               examples:
-                missingBearer:
+                missingOrInvalidToken:
                   value:
                     code: 10002
-                    message: missing bearer token
+                    message: invalid or missing access token
                     data: null
-                invalidAccessToken:
+                userNotFound:
                   value:
                     code: 10002
                     message: invalid access token
@@ -312,6 +319,13 @@ paths:
     post:
       tags: [Documents]
       summary: 创建文本文档
+      description: |
+        接收用户粘贴的文本并创建文档，创建后状态为 `ready`。
+
+        实际行为：
+        - 请求体由中间件限制为最大 256 KiB，超限返回 413
+        - `title` 必填且去空格后非空，`text` 必填且去空格后非空，字符数上限 50,000（按 Unicode 字符计）
+        - 成功时 `data` 为 `Document`
       operationId: createTextDocument
       security:
         - bearerAuth: []
@@ -321,6 +335,11 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateTextDocumentRequest"
+            examples:
+              default:
+                value:
+                  title: 比赛要求
+                  text: 请于7月30日前提交项目说明书和演示视频
       responses:
         "201":
           description: 创建成功
@@ -329,39 +348,82 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentEnvelope"
         "400":
-          description: 请求参数无效
+          description: 请求参数无效（字段缺失或校验失败）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidInput:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
+                bindingError:
+                  value:
+                    code: 10001
+                    message: "Key: 'CreateTextDocumentRequest.Text' Error:Field validation for 'Text' failed on the 'required' tag"
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "413":
           description: 请求体超过 256 KiB
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                payloadTooLarge:
+                  value:
+                    code: 10009
+                    message: request body too large
+                    data: null
         "503":
           description: 数据库未连接
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/documents:
     get:
       tags: [Documents]
       summary: 分页查询当前用户文档
+      description: 返回当前用户的文档列表，按 `created_at DESC, id DESC` 排序，列表项不含正文。
       operationId: listDocuments
       security:
         - bearerAuth: []
       parameters:
         - name: page
           in: query
+          description: 页码，从 1 开始，缺省为 1
           schema:
             type: integer
             minimum: 1
@@ -369,6 +431,7 @@ paths:
             default: 1
         - name: page_size
           in: query
+          description: 每页数量，缺省为 10
           schema:
             type: integer
             minimum: 1
@@ -387,17 +450,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPagination:
+                  value:
+                    code: 10001
+                    message: "Key: 'DocumentListRequest.PageSize' Error:Field validation for 'PageSize' failed on the 'max' tag"
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/documents/{documentId}:
     parameters:
       - name: documentId
         in: path
         required: true
+        description: 文档 ID
         schema:
           type: integer
           format: int64
@@ -405,6 +505,7 @@ paths:
     get:
       tags: [Documents]
       summary: 查询文档详情
+      description: 返回文档详情，含正文 `content`（优先取 `text_input`，其次 `raw_text`）。
       operationId: getDocument
       security:
         - bearerAuth: []
@@ -415,22 +516,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DocumentEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPathId:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 文档不存在或不属于当前用户
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                notFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
     delete:
       tags: [Documents]
       summary: 删除文档
-      description: 软删除文档；存在 pending 或 processing 解析任务时返回 409，已生成的项目和任务不受影响。
+      description: |
+        软删除文档；存在 `pending` 或 `processing` 解析任务时返回 409，已生成的解析结果、项目和任务不受影响。
       operationId: deleteDocument
       security:
         - bearerAuth: []
@@ -441,29 +591,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmptyEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPathId:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 文档不存在或不属于当前用户
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                notFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
         "409":
           description: 文档存在待处理或处理中的解析任务
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                activeParseJob:
+                  value:
+                    code: 10007
+                    message: resource conflict
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/parse-jobs:
     post:
       tags: [ParseJobs]
       summary: 创建解析任务
-      description: 当前版本创建后状态为 `pending`，后台 Redis worker 尚未接入。
+      description: |
+        为指定文档创建解析任务。
+
+        实际行为：
+        - 文档不存在或不属于当前用户返回 404
+        - 文档状态不是 `ready` 返回 422
+        - 文档已存在 `pending` 或 `processing` 任务返回 409（由文档行锁和部分唯一索引共同保证）
+        - 创建成功后状态固定为 `pending`，后台 Redis worker 尚未接入
       operationId: createParseJob
       security:
         - bearerAuth: []
@@ -473,6 +684,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateParseJobRequest"
+            examples:
+              default:
+                value:
+                  document_id: 101
       responses:
         "201":
           description: 创建成功
@@ -480,34 +695,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParseJobEnvelope"
+        "400":
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidRequest:
+                  value:
+                    code: 10001
+                    message: "Key: 'CreateParseJobRequest.DocumentID' Error:Field validation for 'DocumentID' failed on the 'required' tag"
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 文档不存在或不属于当前用户
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                documentNotFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
         "409":
           description: 文档已有待处理或处理中的任务
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                activeJobExists:
+                  value:
+                    code: 10007
+                    message: resource conflict
+                    data: null
         "422":
-          description: 文档状态不允许解析
+          description: 文档状态不允许解析（需为 `ready`）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidState:
+                  value:
+                    code: 10008
+                    message: invalid resource state
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/parse-jobs/{jobId}:
     get:
       tags: [ParseJobs]
       summary: 查询解析任务
+      description: 返回指定解析任务的状态与时间字段。
       operationId: getParseJob
       security:
         - bearerAuth: []
@@ -515,6 +791,7 @@ paths:
         - name: jobId
           in: path
           required: true
+          description: 解析任务 ID
           schema:
             type: integer
             format: int64
@@ -526,22 +803,77 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParseJobEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPathId:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 解析任务不存在或不属于当前用户
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                notFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/parse-jobs/{jobId}/retry:
     post:
       tags: [ParseJobs]
       summary: 重试失败的解析任务
+      description: |
+        将 `failed` 状态的解析任务重置为 `pending`，`retry_count` 自增，并清空 `error_message`、`started_at`、`finished_at`。
+
+        实际行为：
+        - 任务不存在返回 404
+        - 任务状态不是 `failed` 返回 422
+        - 重置过程中触发活跃任务唯一约束时返回 409
       operationId: retryParseJob
       security:
         - bearerAuth: []
@@ -549,6 +881,7 @@ paths:
         - name: jobId
           in: path
           required: true
+          description: 解析任务 ID
           schema:
             type: integer
             format: int64
@@ -560,28 +893,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParseJobEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPathId:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 解析任务不存在或不属于当前用户
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-        "422":
-          description: 只有 failed 状态可以重试
+              examples:
+                notFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
+        "409":
+          description: 重置过程中触发活跃任务唯一约束
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                conflict:
+                  value:
+                    code: 10007
+                    message: resource conflict
+                    data: null
+        "422":
+          description: 只有 `failed` 状态可以重试
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidState:
+                  value:
+                    code: 10008
+                    message: invalid resource state
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
   /api/v1/documents/{documentId}/latest-job:
     get:
       tags: [ParseJobs]
       summary: 查询文档最新解析任务
+      description: 返回指定文档最近一次解析任务（按 `created_at DESC, id DESC`）。
       operationId: getLatestDocumentParseJob
       security:
         - bearerAuth: []
@@ -589,6 +989,7 @@ paths:
         - name: documentId
           in: path
           required: true
+          description: 文档 ID
           schema:
             type: integer
             format: int64
@@ -600,18 +1001,66 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParseJobEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidPathId:
+                  value:
+                    code: 10001
+                    message: invalid input
+                    data: null
         "401":
           description: 未授权
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unauthorized:
+                  value:
+                    code: 10002
+                    message: invalid or missing access token
+                    data: null
         "404":
           description: 文档暂无解析任务
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                notFound:
+                  value:
+                    code: 10006
+                    message: resource not found
+                    data: null
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                dbUnavailable:
+                  value:
+                    code: 10004
+                    message: database not connected
+                    data: null
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                default:
+                  value:
+                    code: 10005
+                    message: internal server error
+                    data: null
 components:
   securitySchemes:
     bearerAuth:
