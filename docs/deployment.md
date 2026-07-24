@@ -30,6 +30,8 @@ chmod +x scripts/deploy_prod.sh
 ./scripts/deploy_prod.sh
 ```
 
+部署脚本会在 PostgreSQL 就绪后自动执行幂等增量迁移，迁移成功后才构建并更新应用容器。迁移失败时部署会立即停止，旧应用容器继续运行。
+
 ## 生产配置模型
 
 `etc/taskpilot-api.prod.yaml` 负责保存“已提交到仓库的配置结构模板”；真正的敏感值通过 `.env.prod` 中的环境变量覆盖注入：
@@ -78,7 +80,7 @@ git pull --ff-only origin dev
 sh ./scripts/deploy_dev.sh
 ```
 
-开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的数据库初始化流程。
+开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的基础建表流程；它会等待开发 PostgreSQL 就绪，自动执行幂等增量迁移，然后更新应用容器。
 
 部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。首次迁移时，如果新项目尚未完整拥有 `app` 和 `redis` 服务，脚本会自动删除名称包含 `taskpilot-dev-` 的旧开发容器以及失败重建遗留的临时容器，再由新项目重新创建；新项目完整建立后，后续部署不会重复清理正常容器。命名卷不会被删除，开发数据会保留。
 
@@ -89,15 +91,10 @@ sh ./scripts/deploy_dev.sh
 仅在开发服务器上执行以下脚本。脚本会重建 8 个固定邮箱的体验账号及其测试数据，不会修改其他用户的数据；重复执行可将样例恢复到初始状态。
 
 ```bash
-chmod +x scripts/seed_dev_data.sh
-./scripts/seed_dev_data.sh --confirm-dev
-```
-
-默认读取 `.env.prod` 和 `docker-compose.prod.yml`。如果开发服务器使用其他文件，可在执行时覆盖：
-
-```bash
-ENV_FILE=/srv/taskpilot-server/.env.dev \
-COMPOSE_FILE=/srv/taskpilot-server/docker-compose.dev.yml \
+COMPOSE_PROJECT_NAME=taskpilot-dev-server \
+COMPOSE_FILE="$PWD/docker-compose.dev.yml" \
+ENV_FILE="$PWD/.env.dev" \
+POSTGRES_DB=taskpilot_dev \
 ./scripts/seed_dev_data.sh --confirm-dev
 ```
 

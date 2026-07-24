@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -17,6 +17,10 @@ tags:
     description: 系统与示例接口
   - name: Auth
     description: 认证接口
+  - name: Documents
+    description: 文档录入与查询
+  - name: ParseJobs
+    description: 解析任务创建与状态查询
 paths:
   /healthz:
     get:
@@ -304,6 +308,310 @@ paths:
                     code: 10005
                     message: internal server error
                     data: null
+  /api/v1/documents/text:
+    post:
+      tags: [Documents]
+      summary: 创建文本文档
+      operationId: createTextDocument
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTextDocumentRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEnvelope"
+        "400":
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "413":
+          description: 请求体超过 256 KiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: 分页查询当前用户文档
+      operationId: listDocuments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000000
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListEnvelope"
+        "400":
+          description: 分页参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/documents/{documentId}:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    get:
+      tags: [Documents]
+      summary: 查询文档详情
+      operationId: getDocument
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 文档不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [Documents]
+      summary: 删除文档
+      description: 软删除文档；存在 pending 或 processing 解析任务时返回 409，已生成的项目和任务不受影响。
+      operationId: deleteDocument
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 文档不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 文档存在待处理或处理中的解析任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/parse-jobs:
+    post:
+      tags: [ParseJobs]
+      summary: 创建解析任务
+      description: 当前版本创建后状态为 `pending`，后台 Redis worker 尚未接入。
+      operationId: createParseJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateParseJobRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseJobEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 文档不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 文档已有待处理或处理中的任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 文档状态不允许解析
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/parse-jobs/{jobId}:
+    get:
+      tags: [ParseJobs]
+      summary: 查询解析任务
+      operationId: getParseJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseJobEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 解析任务不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/parse-jobs/{jobId}/retry:
+    post:
+      tags: [ParseJobs]
+      summary: 重试失败的解析任务
+      operationId: retryParseJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: 已重置为 pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseJobEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 解析任务不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 只有 failed 状态可以重试
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/documents/{documentId}/latest-job:
+    get:
+      tags: [ParseJobs]
+      summary: 查询文档最新解析任务
+      operationId: getLatestDocumentParseJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseJobEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 文档暂无解析任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:
@@ -467,3 +775,150 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/UserProfile"
+    CreateTextDocumentRequest:
+      type: object
+      required: [title, text]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          example: 比赛要求
+        text:
+          type: string
+          maxLength: 50000
+          example: 请于7月30日前提交项目说明书和演示视频
+    DocumentSummary:
+      type: object
+      required: [id, source_type, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        source_type:
+          type: string
+          enum: [pdf, text]
+        title:
+          type: string
+          nullable: true
+        file_name:
+          type: string
+          nullable: true
+        file_url:
+          type: string
+          nullable: true
+        page_count:
+          type: integer
+          format: int32
+          nullable: true
+        file_size:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [uploaded, ready, failed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Document:
+      allOf:
+        - $ref: "#/components/schemas/DocumentSummary"
+        - type: object
+          properties:
+            content:
+              type: string
+              nullable: true
+    DocumentList:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    CreateParseJobRequest:
+      type: object
+      required: [document_id]
+      properties:
+        document_id:
+          type: integer
+          format: int64
+          minimum: 1
+    ParseJob:
+      type: object
+      required: [id, document_id, job_type, status, retry_count, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        document_id:
+          type: integer
+          format: int64
+        job_type:
+          type: string
+          enum: [ai_parse]
+        status:
+          type: string
+          enum: [pending, processing, success, failed]
+        retry_count:
+          type: integer
+          format: int32
+        error_message:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DocumentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/Document"
+    DocumentListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/DocumentList"
+    ParseJobEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/ParseJob"
+    EmptyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object

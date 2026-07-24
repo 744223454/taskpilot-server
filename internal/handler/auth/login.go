@@ -21,7 +21,7 @@ func LoginHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 
 		resp, err := authlogic.NewService(c.Request.Context(), svcCtx).Login(&req)
 		if err != nil {
-			writeAuthError(c, err)
+			writeAuthError(c, svcCtx, err)
 			return
 		}
 

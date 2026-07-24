@@ -37,7 +37,28 @@ remove_legacy_containers() {
 	done
 }
 
+wait_for_postgres() {
+	attempts=0
+	until compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
+		attempts=$((attempts + 1))
+		if [ "$attempts" -ge 30 ]; then
+			echo "postgres did not become ready in time"
+			exit 1
+		fi
+		sleep 2
+	done
+}
+
+apply_incremental_migrations() {
+	echo "applying incremental database migrations"
+	compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+		< "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
+}
+
 compose config --quiet
 compose build
 remove_legacy_containers
+compose up -d postgres redis
+wait_for_postgres
+apply_incremental_migrations
 compose up -d
