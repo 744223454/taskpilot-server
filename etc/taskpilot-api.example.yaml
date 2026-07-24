@@ -14,3 +14,10 @@ Cache:
 Auth:
   AccessSecret: "taskpilot-local-dev-secret-change-me"
   AccessExpire: 86400
+
+CORS:
+  AllowedOrigins:
+    - "http://localhost:5173"
+    - "http://localhost:5174"
+    - "https://dev.taskpilot.1kuansi.cn"
+    - "https://taskpilot.1kuansi.cn"

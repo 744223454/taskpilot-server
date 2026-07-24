@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
@@ -31,6 +32,11 @@ type Config struct {
 		AccessSecret string `yaml:"AccessSecret"`
 		AccessExpire int64  `yaml:"AccessExpire"`
 	} `yaml:"Auth"`
+
+	// CORS holds cross-origin resource sharing settings for the API.
+	CORS struct {
+		AllowedOrigins []string `yaml:"AllowedOrigins"`
+	} `yaml:"CORS"`
 }
 
 func Load(path string) (Config, error) {
@@ -66,7 +72,23 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("config Auth.AccessExpire is required")
 	}
 
+	if len(cfg.CORS.AllowedOrigins) == 0 {
+		cfg.CORS.AllowedOrigins = defaultCORSOrigins()
+	}
+
 	return cfg, nil
+}
+
+// defaultCORSOrigins returns the frontend origins allowed to call the API.
+// Dev runs on the Vite dev server (localhost:5173/5174); production and the
+// deployed API share the 1kuansi.cn domains.
+func defaultCORSOrigins() []string {
+	return []string{
+		"http://localhost:5173",
+		"http://localhost:5174",
+		"https://dev.taskpilot.1kuansi.cn",
+		"https://taskpilot.1kuansi.cn",
+	}
 }
 
 func applyEnvOverrides(cfg *Config) {
@@ -83,6 +105,8 @@ func applyEnvOverrides(cfg *Config) {
 
 	cfg.Auth.AccessSecret = envString("TASKPILOT_AUTH_ACCESS_SECRET", cfg.Auth.AccessSecret)
 	cfg.Auth.AccessExpire = envInt64("TASKPILOT_AUTH_ACCESS_EXPIRE", cfg.Auth.AccessExpire)
+
+	cfg.CORS.AllowedOrigins = envStringSlice("TASKPILOT_CORS_ALLOWED_ORIGINS", cfg.CORS.AllowedOrigins)
 }
 
 func envString(key, fallback string) string {
@@ -110,4 +134,24 @@ func envInt64(key string, fallback int64) int64 {
 		}
 	}
 	return fallback
+}
+
+// envStringSlice reads a comma-separated list from the environment, e.g.
+// "http://a,https://b". An empty value falls back to the configured list.
+func envStringSlice(key string, fallback []string) []string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return fallback
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
