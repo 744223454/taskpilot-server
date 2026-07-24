@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.3.0
+  version: 0.3.1
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -186,7 +186,7 @@ paths:
             examples:
               default:
                 value:
-                  email: test@example.com
+                  email: test
                   password: "12345678"
       responses:
         "200":
@@ -1081,21 +1081,22 @@ components:
           type: string
           example: ok
     ErrorEnvelope:
-      allOf:
-        - $ref: "#/components/schemas/Envelope"
-        - type: object
-          required:
-            - data
-          properties:
-            code:
-              type: integer
-              example: 10002
-            message:
-              type: string
-              example: invalid access token
-            data:
-              nullable: true
-              example: null
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          example: 10002
+        message:
+          type: string
+          example: invalid access token
+        data:
+          type: object
+          nullable: true
+          example: null
     HealthPayload:
       type: object
       required:
@@ -1273,13 +1274,44 @@ components:
           type: string
           format: date-time
     Document:
-      allOf:
-        - $ref: "#/components/schemas/DocumentSummary"
-        - type: object
-          properties:
-            content:
-              type: string
-              nullable: true
+      type: object
+      required: [id, source_type, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        source_type:
+          type: string
+          enum: [pdf, text]
+        title:
+          type: string
+          nullable: true
+        file_name:
+          type: string
+          nullable: true
+        file_url:
+          type: string
+          nullable: true
+        page_count:
+          type: integer
+          format: int32
+          nullable: true
+        file_size:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [uploaded, ready, failed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        content:
+          type: string
+          nullable: true
     DocumentList:
       type: object
       required: [items, page, page_size, total]
