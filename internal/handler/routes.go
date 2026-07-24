@@ -11,6 +11,8 @@ import (
 
 // RegisterRoutes wires all HTTP endpoints onto the Gin engine.
 func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
+	router.Use(middleware.CORS(serverCtx.Config.CORS.AllowedOrigins))
+
 	router.GET("/healthz", HealthHandler(serverCtx))
 	router.GET("/from/:name", TaskpilotHandler(serverCtx))
 

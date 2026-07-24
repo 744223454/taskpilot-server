@@ -14,3 +14,8 @@ Cache:
 Auth:
   AccessSecret: ""
   AccessExpire: 86400
+
+CORS:
+  AllowedOrigins:
+    - "https://dev.taskpilot.1kuansi.cn"
+    - "https://taskpilot.1kuansi.cn"
