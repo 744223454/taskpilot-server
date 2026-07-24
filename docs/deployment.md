@@ -80,7 +80,15 @@ git pull --ff-only origin dev
 sh ./scripts/deploy_dev.sh
 ```
 
-开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发容器，不会执行生产环境的基础建表流程；它会等待开发 PostgreSQL 就绪，自动执行幂等增量迁移，然后更新应用容器。
+开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发 `app` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器对 `taskpilot_dev` 执行幂等增量迁移，然后更新应用容器。
+
+脚本默认使用以下值，必要时可在执行脚本前覆盖：
+
+- `POSTGRES_CONTAINER=taskpilot-postgres`
+- `POSTGRES_USER=taskpilot`
+- `POSTGRES_DB=taskpilot_dev`
+
+禁止将开发环境的 `POSTGRES_DB` 设置为生产数据库 `taskpilot`。
 
 部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。首次迁移时，如果新项目尚未完整拥有 `app` 和 `redis` 服务，脚本会自动删除名称包含 `taskpilot-dev-` 的旧开发容器以及失败重建遗留的临时容器，再由新项目重新创建；新项目完整建立后，后续部署不会重复清理正常容器。命名卷不会被删除，开发数据会保留。
 
