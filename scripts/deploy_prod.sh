@@ -40,4 +40,7 @@ else
 	$COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate.sql"
 fi
 
+echo "applying incremental database migrations"
+$COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
+
 $COMPOSE up -d --build app

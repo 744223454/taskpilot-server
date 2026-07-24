@@ -125,6 +125,24 @@ GET  /from/:name
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 GET  /api/v1/users/me
+POST /api/v1/documents/text
+GET  /api/v1/documents
+GET  /api/v1/documents/:documentId
+DELETE /api/v1/documents/:documentId
+POST /api/v1/parse-jobs
+GET  /api/v1/parse-jobs/:jobId
+POST /api/v1/parse-jobs/:jobId/retry
+GET  /api/v1/documents/:documentId/latest-job
+```
+
+文档与解析任务接口需要 Bearer Token。解析任务当前只负责落库并进入 `pending`，Redis 消费和 AI 解析将在下一阶段接入。
+
+文本文档请求体上限为 `256 KiB`，正文最多 `50,000` 个 Unicode 字符。删除文档采用软删除，存在活跃解析任务时会返回冲突，已生成项目和任务不会被级联删除。
+
+生产和开发部署脚本会在更新应用容器前自动执行幂等增量迁移。仅本地手动升级已有数据库时执行：
+
+```bash
+make migrate-documents-soft-delete-parse-jobs-unique
 ```
 
 统一返回格式：

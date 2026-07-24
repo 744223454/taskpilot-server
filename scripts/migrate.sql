@@ -25,6 +25,7 @@ CREATE TABLE documents (
     status VARCHAR(20) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ,
     CONSTRAINT fk_documents_user
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT chk_documents_source_type
@@ -40,6 +41,7 @@ CREATE TABLE documents (
 );
 
 CREATE INDEX idx_documents_user_id ON documents(user_id);
+CREATE INDEX idx_documents_deleted_at ON documents(deleted_at);
 
 CREATE TABLE parse_jobs (
     id BIGSERIAL PRIMARY KEY,
@@ -67,6 +69,9 @@ CREATE TABLE parse_jobs (
 
 CREATE INDEX idx_parse_jobs_user_id ON parse_jobs(user_id);
 CREATE INDEX idx_parse_jobs_document_id ON parse_jobs(document_id);
+CREATE UNIQUE INDEX uq_parse_jobs_active_document
+    ON parse_jobs(document_id)
+    WHERE status IN ('pending', 'processing');
 
 CREATE TABLE parse_results (
     id BIGSERIAL PRIMARY KEY,
