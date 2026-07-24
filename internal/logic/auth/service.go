@@ -3,8 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
+	logicerrors "github.com/744223454/taskpilot-server/internal/logic"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	"github.com/744223454/taskpilot-server/internal/types"
 	"github.com/744223454/taskpilot-server/model/usermodel"
@@ -14,7 +16,6 @@ import (
 )
 
 var ErrEmailRegistered = errors.New("email already registered")
-var ErrDatabaseNotConnected = errors.New("database not connected")
 var ErrInvalidCredentials = errors.New("invalid email or password")
 var ErrInvalidAccessToken = errors.New("invalid access token")
 
@@ -41,7 +42,7 @@ func (s *Service) Register(req *types.RegisterRequest) (*types.AuthResponse, err
 	email := normalizeEmail(req.Email)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("hash registration password: %w", err)
 	}
 
 	user := usermodel.User{
@@ -54,12 +55,12 @@ func (s *Service) Register(req *types.RegisterRequest) (*types.AuthResponse, err
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			return nil, ErrEmailRegistered
 		}
-		return nil, err
+		return nil, fmt.Errorf("create user: %w", err)
 	}
 
 	token, err := issueToken(s.svcCtx.JWT, user)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("issue registration token: %w", err)
 	}
 
 	return newAuthResponse(user, token, s.svcCtx.Config.Auth.AccessExpire), nil
@@ -81,7 +82,7 @@ func (s *Service) Login(req *types.LoginRequest) (*types.AuthResponse, error) {
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("find user for login: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -90,33 +91,25 @@ func (s *Service) Login(req *types.LoginRequest) (*types.AuthResponse, error) {
 
 	token, err := issueToken(s.svcCtx.JWT, user)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("issue login token: %w", err)
 	}
 
 	return newAuthResponse(user, token, s.svcCtx.Config.Auth.AccessExpire), nil
 }
 
-func (s *Service) CurrentUser(accessToken string) (*types.UserProfile, error) {
+func (s *Service) CurrentUserByID(userID int64) (*types.UserProfile, error) {
 	if err := s.requireDB(); err != nil {
 		return nil, err
 	}
 
-	claims, err := s.svcCtx.JWT.ParseToken(accessToken)
-	if errors.Is(err, jwtauth.ErrInvalidToken) || errors.Is(err, jwtauth.ErrExpiredToken) {
-		return nil, ErrInvalidAccessToken
-	}
-	if err != nil {
-		return nil, err
-	}
-
 	user, err := gorm.G[usermodel.User](s.svcCtx.DB).
-		Where("id = ?", claims.UserID).
+		Where("id = ?", userID).
 		First(s.ctx)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrInvalidAccessToken
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("find current user: %w", err)
 	}
 
 	return &types.UserProfile{
@@ -154,7 +147,7 @@ func normalizeEmail(email string) string {
 
 func (s *Service) requireDB() error {
 	if s.svcCtx.DB == nil {
-		return ErrDatabaseNotConnected
+		return logicerrors.ErrDatabaseUnavailable
 	}
 	return nil
 }

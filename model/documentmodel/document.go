@@ -1,6 +1,10 @@
 package documentmodel
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Document struct {
 	ID         int64   `gorm:"primaryKey;autoIncrement"`
@@ -16,4 +20,5 @@ type Document struct {
 	Status     string  `gorm:"type:varchar(20);not null"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	DeletedAt  gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
