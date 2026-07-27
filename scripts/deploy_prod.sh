@@ -6,6 +6,8 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 COMPOSE_FILE=${COMPOSE_FILE:-"$ROOT_DIR/docker-compose.prod.yml"}
 ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.prod"}
 CONFIG_FILE=${CONFIG_FILE:-"$ROOT_DIR/etc/taskpilot-api.prod.yaml"}
+WORKER_ENV_FILE=${WORKER_ENV_FILE:-"$ROOT_DIR/.env.worker.prod"}
+export TASKPILOT_WORKER_ENV_FILE=$WORKER_ENV_FILE
 COMPOSE="docker compose --env-file $ENV_FILE -f $COMPOSE_FILE"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -18,9 +20,20 @@ if [ ! -f "$CONFIG_FILE" ]; then
 	exit 1
 fi
 
+if [ ! -f "$WORKER_ENV_FILE" ]; then
+	echo "missing $WORKER_ENV_FILE"
+	exit 1
+fi
+
 set -a
 . "$ENV_FILE"
+. "$WORKER_ENV_FILE"
 set +a
+
+if [ -z "${TASKPILOT_AI_API_KEY:-}" ]; then
+	echo "missing TASKPILOT_AI_API_KEY in $WORKER_ENV_FILE"
+	exit 1
+fi
 
 $COMPOSE up -d postgres redis
 
@@ -43,4 +56,4 @@ fi
 echo "applying incremental database migrations"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
 
-$COMPOSE up -d --build app
+$COMPOSE up -d --build app worker

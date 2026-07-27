@@ -21,3 +21,24 @@ CORS:
   AllowedOrigins:
     - "https://dev.taskpilot.1kuansi.cn"
     - "https://taskpilot.1kuansi.cn"
+
+AI:
+  BaseURL: "https://ai.soruxgpt.com/v1"
+  APIKey: ""
+  Model: "gpt-5.4"
+  RequestTimeout: 180
+  MaxOutputTokens: 8000
+
+Worker:
+  StreamKey: "taskpilot:queue:parse_jobs"
+  ConsumerGroup: "taskpilot:parse_workers"
+  Concurrency: 2
+  BlockTimeout: 5
+  ReconcileInterval: 30
+  PendingGrace: 30
+  LeaseTimeout: 600
+  MaxRecoveries: 3
+  StreamRetention: 604800
+  HeartbeatInterval: 10
+  HeartbeatTTL: 30
+  ShutdownGrace: 180

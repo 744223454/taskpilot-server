@@ -5,6 +5,7 @@
 当前仓库已经按“单台云服务器 + Docker Compose”方式准备好部署：
 
 - `app`：Go API 服务
+- `worker`：独立解析进程，消费 Redis Streams 并调用 AI
 - `postgres`：PostgreSQL 16，已启用持久化卷
 - `redis`：Redis 7，已启用持久化卷
 
@@ -21,16 +22,17 @@
 
 1. 在服务器上克隆仓库。
 2. 将 `.env.prod.example` 复制为 `.env.prod`。
-3. 将 `etc/taskpilot-api.prod.example.yaml` 复制为 `etc/taskpilot-api.prod.yaml`。
-4. 将 `.env.prod` 中的占位密钥、密码全部替换为真实值。
-5. 执行：
+3. 将 `.env.worker.prod.example` 复制为 `.env.worker.prod`。
+4. 将 `etc/taskpilot-api.prod.example.yaml` 复制为 `etc/taskpilot-api.prod.yaml`。
+5. 替换 `.env.prod` 中的应用密钥与密码，并在 `.env.worker.prod` 配置 SoruxGPT API Key。
+6. 执行：
 
 ```bash
 chmod +x scripts/deploy_prod.sh
 ./scripts/deploy_prod.sh
 ```
 
-部署脚本会在 PostgreSQL 就绪后自动执行幂等增量迁移，迁移成功后才构建并更新应用容器。迁移失败时部署会立即停止，旧应用容器继续运行。
+部署脚本会先校验 Worker AI Key，在 PostgreSQL 就绪后自动执行幂等增量迁移，再构建一个同时包含 API 与 Worker 二进制的共享镜像，并更新两个容器。迁移失败时部署会立即停止，旧容器继续运行。
 
 ## 生产配置模型
 
@@ -44,6 +46,14 @@ chmod +x scripts/deploy_prod.sh
 - `TASKPILOT_AUTH_REFRESH_EXPIRE`
 - `TASKPILOT_AUTH_COOKIE_SECURE`
 - `POSTGRES_PASSWORD`
+
+Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
+
+- `TASKPILOT_AI_API_KEY`
+- `TASKPILOT_AI_BASE_URL`，默认 `https://ai.soruxgpt.com/v1`
+- `TASKPILOT_AI_MODEL`，默认 `gpt-5.4`
+- `TASKPILOT_AI_REQUEST_TIMEOUT`，默认整次解析 `180` 秒
+- `TASKPILOT_AI_MAX_OUTPUT_TOKENS`，默认 `8000`
 
 这样做的好处是：既能让应用保持稳定的 YAML 配置结构，又能避免把生产密钥直接提交到 Git。
 
@@ -74,7 +84,7 @@ git pull --ff-only
 
 如果两个环境位于同一台服务器，可以共用主机、端口、用户和 SSH 密钥，只分别配置两个部署目录。
 
-开发服务器需在部署目录中准备不提交到 Git 的 `.env.dev` 和 `etc/taskpilot-api.dev.yaml`。工作流会在服务器执行：
+开发服务器需在部署目录中准备不提交到 Git 的 `.env.dev`、`.env.worker.dev` 和 `etc/taskpilot-api.dev.yaml`。`.env.worker.dev` 可从 `.env.worker.dev.example` 复制后填入开发环境 AI Key。工作流会在服务器执行：
 
 ```bash
 git switch dev
@@ -82,7 +92,7 @@ git pull --ff-only origin dev
 sh ./scripts/deploy_dev.sh
 ```
 
-开发部署脚本使用 `docker-compose.dev.yml` 重新构建并启动开发 `app` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器对 `taskpilot_dev` 执行幂等增量迁移，然后更新应用容器。
+开发部署脚本使用服务器已有且不提交的 `docker-compose.dev.yml`，叠加仓库内的 `docker-compose.dev.worker.yml`，重新构建共享镜像并启动开发 `app`、`worker` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器对 `taskpilot_dev` 执行幂等增量迁移，然后更新两个应用进程。
 
 脚本默认使用以下值，必要时可在执行脚本前覆盖：
 
@@ -95,6 +105,8 @@ sh ./scripts/deploy_dev.sh
 部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。首次迁移时，如果新项目尚未完整拥有 `app` 和 `redis` 服务，脚本会自动删除名称包含 `taskpilot-dev-` 的旧开发容器以及失败重建遗留的临时容器，再由新项目重新创建；新项目完整建立后，后续部署不会重复清理正常容器。命名卷不会被删除，开发数据会保留。
 
 如果 `docker-compose.dev.yml` 继续复用旧项目创建的命名卷，应将这些卷声明为 `external: true`，避免 Docker Compose 输出归属警告。
+
+Worker 应用内部最多等待 180 秒完成在途解析；Compose 为 Worker 保留 190 秒停止宽限期。`GET /healthz` 的 `worker` 字段由 Redis 心跳判断，Worker 停止后最多约 30 秒变为 `false`。
 
 ## 开发服务器测试数据
 

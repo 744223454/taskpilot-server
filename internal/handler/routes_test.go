@@ -19,7 +19,12 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		JWT: jwtauth.NewManager("test-secret", 3600),
 	})
 
-	for _, path := range []string{"/api/v1/users/me", "/api/v1/documents"} {
+	for _, path := range []string{
+		"/api/v1/users/me",
+		"/api/v1/documents",
+		"/api/v1/parse-jobs/1/result",
+		"/api/v1/parse-results/1",
+	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)

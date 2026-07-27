@@ -1,4 +1,4 @@
-.PHONY: run build test tidy fmt migrate migrate-users-email-normalized migrate-documents-soft-delete-parse-jobs-unique docker-build prod-up prod-down prod-deploy migrate-prod
+.PHONY: run run-worker build test tidy fmt migrate migrate-users-email-normalized migrate-documents-soft-delete-parse-jobs-unique docker-build prod-up prod-down prod-deploy migrate-prod
 
 APP := taskpilot
 CONFIG ?= etc/taskpilot-api.yaml
@@ -9,8 +9,12 @@ PROD_ENV ?= .env.prod
 run:
 	go run ./cmd/api -f $(CONFIG)
 
+run-worker:
+	go run ./cmd/worker -f $(CONFIG)
+
 build:
-	go build -o bin/$(APP) ./cmd/api
+	go build -o bin/$(APP)-api ./cmd/api
+	go build -o bin/$(APP)-worker ./cmd/worker
 
 test:
 	go test ./...
