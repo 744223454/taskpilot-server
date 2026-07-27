@@ -11,4 +11,6 @@ const (
 	CodeConflict            = 10007
 	CodeInvalidState        = 10008
 	CodePayloadTooLarge     = 10009
+	CodeServiceUnavailable  = 10010
+	CodeForbidden           = 10011
 )
