@@ -29,8 +29,10 @@ type Config struct {
 
 	// Auth holds JWT signing settings.
 	Auth struct {
-		AccessSecret string `yaml:"AccessSecret"`
-		AccessExpire int64  `yaml:"AccessExpire"`
+		AccessSecret  string `yaml:"AccessSecret"`
+		AccessExpire  int64  `yaml:"AccessExpire"`
+		RefreshExpire int64  `yaml:"RefreshExpire"`
+		CookieSecure  bool   `yaml:"CookieSecure"`
 	} `yaml:"Auth"`
 
 	// CORS holds cross-origin resource sharing settings for the API.
@@ -68,8 +70,14 @@ func Load(path string) (Config, error) {
 	if cfg.Auth.AccessSecret == "" {
 		return cfg, fmt.Errorf("config Auth.AccessSecret is required")
 	}
-	if cfg.Auth.AccessExpire == 0 {
-		return cfg, fmt.Errorf("config Auth.AccessExpire is required")
+	if cfg.Auth.AccessExpire <= 0 {
+		return cfg, fmt.Errorf("config Auth.AccessExpire must be positive")
+	}
+	if cfg.Auth.RefreshExpire == 0 {
+		cfg.Auth.RefreshExpire = 30 * 24 * 60 * 60
+	}
+	if cfg.Auth.RefreshExpire < 0 {
+		return cfg, fmt.Errorf("config Auth.RefreshExpire must not be negative")
 	}
 
 	if len(cfg.CORS.AllowedOrigins) == 0 {
@@ -105,8 +113,20 @@ func applyEnvOverrides(cfg *Config) {
 
 	cfg.Auth.AccessSecret = envString("TASKPILOT_AUTH_ACCESS_SECRET", cfg.Auth.AccessSecret)
 	cfg.Auth.AccessExpire = envInt64("TASKPILOT_AUTH_ACCESS_EXPIRE", cfg.Auth.AccessExpire)
+	cfg.Auth.RefreshExpire = envInt64("TASKPILOT_AUTH_REFRESH_EXPIRE", cfg.Auth.RefreshExpire)
+	cfg.Auth.CookieSecure = envBool("TASKPILOT_AUTH_COOKIE_SECURE", cfg.Auth.CookieSecure)
 
 	cfg.CORS.AllowedOrigins = envStringSlice("TASKPILOT_CORS_ALLOWED_ORIGINS", cfg.CORS.AllowedOrigins)
+}
+
+func envBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func envString(key, fallback string) string {

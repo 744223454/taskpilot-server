@@ -6,6 +6,7 @@ import (
 	"github.com/744223454/taskpilot-server/internal/handler/middleware"
 	parsejobhandler "github.com/744223454/taskpilot-server/internal/handler/parsejob"
 	"github.com/744223454/taskpilot-server/internal/svc"
+	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,9 +20,12 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	api := router.Group("/api/v1")
 	api.POST("/auth/register", authhandler.RegisterHandler(serverCtx))
 	api.POST("/auth/login", authhandler.LoginHandler(serverCtx))
+	api.POST("/auth/refresh", middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.RefreshHandler(serverCtx))
+	api.POST("/auth/logout", middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.LogoutHandler(serverCtx))
 
 	protected := api.Group("")
 	protected.Use(middleware.RequireAuth(serverCtx))
+	protected.Use(middleware.RequireCSRFForCookieAuth())
 	protected.GET("/users/me", authhandler.MeHandler(serverCtx))
 	protected.POST("/documents/text", middleware.LimitRequestBody(documenthandler.MaxTextDocumentBodyBytes), documenthandler.CreateTextHandler(serverCtx))
 	protected.GET("/documents", documenthandler.ListHandler(serverCtx))

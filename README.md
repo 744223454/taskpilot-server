@@ -11,6 +11,7 @@
 - Gin 服务入口
 - Gorm + PostgreSQL 连接初始化
 - JWT 注册、登录、鉴权
+- Redis Refresh 会话、HttpOnly Cookie、CSRF 防护和当前设备登出
 - 统一响应信封
 - 本地数据库初始化脚本
 - 生产部署基础资产：
@@ -23,7 +24,7 @@
 待补充：
 
 - `documents / parse_jobs / parse_results / projects / tasks` 业务接口
-- Redis 真实接入
+- Redis 解析队列、状态缓存和限流能力
 - 文件上传与 AI 解析能力
 
 ## 目录结构
@@ -110,6 +111,8 @@ etc/taskpilot-api.yaml
 - `TASKPILOT_REDIS_PASS`
 - `TASKPILOT_AUTH_ACCESS_SECRET`
 - `TASKPILOT_AUTH_ACCESS_EXPIRE`
+- `TASKPILOT_AUTH_REFRESH_EXPIRE`
+- `TASKPILOT_AUTH_COOKIE_SECURE`
 
 推荐做法：
 
@@ -124,6 +127,8 @@ GET  /healthz
 GET  /from/:name
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+POST /api/v1/auth/refresh
+POST /api/v1/auth/logout
 GET  /api/v1/users/me
 POST /api/v1/documents/text
 GET  /api/v1/documents
@@ -135,7 +140,7 @@ POST /api/v1/parse-jobs/:jobId/retry
 GET  /api/v1/documents/:documentId/latest-job
 ```
 
-文档与解析任务接口需要 Bearer Token。解析任务当前只负责落库并进入 `pending`，Redis 消费和 AI 解析将在下一阶段接入。
+文档与解析任务接口兼容 Bearer Token，也支持 Access Cookie。使用 Cookie 鉴权的写请求必须携带 `X-CSRF-Token`。解析任务当前只负责落库并进入 `pending`，Redis 消费和 AI 解析将在下一阶段接入。
 
 文本文档请求体上限为 `256 KiB`，正文最多 `50,000` 个 Unicode 字符。删除文档采用软删除，存在活跃解析任务时会返回冲突，已生成项目和任务不会被级联删除。
 

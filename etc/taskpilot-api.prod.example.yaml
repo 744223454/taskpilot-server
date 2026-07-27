@@ -13,7 +13,9 @@ Cache:
 
 Auth:
   AccessSecret: ""
-  AccessExpire: 86400
+  AccessExpire: 900
+  RefreshExpire: 2592000
+  CookieSecure: true
 
 CORS:
   AllowedOrigins:
