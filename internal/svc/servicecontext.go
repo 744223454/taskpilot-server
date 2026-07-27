@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/744223454/taskpilot-server/internal/config"
+	"github.com/744223454/taskpilot-server/pkg/ai"
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
 	"github.com/744223454/taskpilot-server/pkg/database"
@@ -20,6 +21,8 @@ type ServiceContext struct {
 	JWT             *jwtauth.Manager
 	Redis           *redis.Client
 	RefreshSessions jwtauth.RefreshSessionStore
+	ParseJobs       cachepkg.ParseJobQueue
+	Parser          ai.Parser
 	Logger          *slog.Logger
 }
 
@@ -45,6 +48,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	redisClient := cachepkg.NewRedis(c.Cache.Host, c.Cache.Pass)
 	serverContext.Redis = redisClient
 	serverContext.RefreshSessions = cachepkg.NewRefreshSessionStore(redisClient)
+	serverContext.ParseJobs = cachepkg.NewParseJobQueue(redisClient, c.Worker.StreamKey, c.Worker.ConsumerGroup)
 	pingContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := redisClient.Ping(pingContext).Err(); err != nil {

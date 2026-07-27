@@ -72,6 +72,7 @@ func (s *Service) Create(userID int64, req *types.CreateParseJobRequest) (*types
 	if err != nil {
 		return nil, err
 	}
+	s.publish(job.ID)
 
 	response := parseJobResponse(job)
 	return &response, nil
@@ -178,6 +179,7 @@ func (s *Service) Retry(userID, jobID int64) (*types.ParseJobResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.publish(job.ID)
 
 	response := parseJobResponse(job)
 	return &response, nil
@@ -201,6 +203,18 @@ func (s *Service) requireDB() error {
 		return logicerrors.ErrDatabaseUnavailable
 	}
 	return nil
+}
+
+func (s *Service) publish(jobID int64) {
+	if s.svcCtx.ParseJobs == nil {
+		if s.svcCtx.Logger != nil {
+			s.svcCtx.Logger.WarnContext(s.ctx, "parse job queue is unavailable", "job_id", jobID)
+		}
+		return
+	}
+	if _, err := s.svcCtx.ParseJobs.Publish(s.ctx, jobID); err != nil && s.svcCtx.Logger != nil {
+		s.svcCtx.Logger.ErrorContext(s.ctx, "parse job publish failed", "job_id", jobID, "error", err)
+	}
 }
 
 func parseJobResponse(job parsejobmodel.ParseJob) types.ParseJobResponse {
