@@ -5,6 +5,7 @@ import (
 	documenthandler "github.com/744223454/taskpilot-server/internal/handler/document"
 	"github.com/744223454/taskpilot-server/internal/handler/middleware"
 	parsejobhandler "github.com/744223454/taskpilot-server/internal/handler/parsejob"
+	parseresulthandler "github.com/744223454/taskpilot-server/internal/handler/parseresult"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	"github.com/gin-gonic/gin"
@@ -35,4 +36,8 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.GET("/parse-jobs/:jobId", parsejobhandler.GetHandler(serverCtx))
 	protected.POST("/parse-jobs/:jobId/retry", parsejobhandler.RetryHandler(serverCtx))
 	protected.GET("/documents/:documentId/latest-job", parsejobhandler.LatestHandler(serverCtx))
+	protected.GET("/parse-jobs/:jobId/result", parseresulthandler.GetByJobHandler(serverCtx))
+	protected.GET("/parse-results/:resultId", parseresulthandler.GetHandler(serverCtx))
+	protected.PUT("/parse-results/:resultId", parseresulthandler.UpdateHandler(serverCtx))
+	protected.POST("/parse-results/:resultId/confirm", parseresulthandler.ConfirmHandler(serverCtx))
 }

@@ -7,6 +7,8 @@ etc/taskpilot-api.prod.yaml
 .env.*
 !.env.example
 !.env.prod.example
+!.env.worker.prod.example
+!.env.worker.dev.example
 
 # Build outputs
 bin/

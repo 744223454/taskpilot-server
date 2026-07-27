@@ -1,0 +1,24 @@
+services:
+  app:
+    image: taskpilot-server:dev
+
+  worker:
+    image: taskpilot-server:dev
+    restart: unless-stopped
+    stop_grace_period: 190s
+    env_file:
+      - .env.dev
+      - ${TASKPILOT_WORKER_ENV_FILE:-.env.worker.dev}
+    command: ["./taskpilot-worker", "-f", "etc/taskpilot-api.dev.yaml"]
+    volumes:
+      - ./etc/taskpilot-api.dev.yaml:/app/etc/taskpilot-api.dev.yaml:ro
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - default
+      - taskpilot_prod_net
+
+networks:
+  taskpilot_prod_net:
+    external: true

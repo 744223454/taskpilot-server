@@ -17,6 +17,7 @@ type healthResponse struct {
 	Status string `json:"status"`
 	DB     bool   `json:"db"`
 	Redis  bool   `json:"redis"`
+	Worker bool   `json:"worker"`
 }
 
 func TaskpilotHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
@@ -39,15 +40,20 @@ func TaskpilotHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 func HealthHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		redisReady := false
+		workerReady := false
 		if svcCtx.Redis != nil {
 			pingContext, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
 			defer cancel()
 			redisReady = svcCtx.Redis.Ping(pingContext).Err() == nil
+			if redisReady && svcCtx.ParseJobs != nil {
+				workerReady, _ = svcCtx.ParseJobs.WorkerHealthy(pingContext)
+			}
 		}
 		response.Success(c, http.StatusOK, healthResponse{
 			Status: "ok",
 			DB:     svcCtx.DB != nil,
 			Redis:  redisReady,
+			Worker: workerReady,
 		})
 	}
 }

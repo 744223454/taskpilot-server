@@ -1,5 +1,6 @@
 services:
   app:
+    image: taskpilot-server:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +10,26 @@ services:
       - .env.prod
     ports:
       - "127.0.0.1:8888:8888"
+    volumes:
+      - ./etc/taskpilot-api.prod.yaml:/app/etc/taskpilot-api.prod.yaml:ro
+      - taskpilot_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - taskpilot_net
+
+  worker:
+    image: taskpilot-server:local
+    container_name: taskpilot-worker
+    restart: unless-stopped
+    stop_grace_period: 190s
+    env_file:
+      - .env.prod
+      - ${TASKPILOT_WORKER_ENV_FILE:-.env.worker.prod}
+    command: ["./taskpilot-worker", "-f", "etc/taskpilot-api.prod.yaml"]
     volumes:
       - ./etc/taskpilot-api.prod.yaml:/app/etc/taskpilot-api.prod.yaml:ro
       - taskpilot_uploads:/app/uploads

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -14,16 +15,20 @@ import (
 	logicerrors "github.com/744223454/taskpilot-server/internal/logic"
 	documentlogic "github.com/744223454/taskpilot-server/internal/logic/document"
 	parsejoblogic "github.com/744223454/taskpilot-server/internal/logic/parsejob"
+	parseresultlogic "github.com/744223454/taskpilot-server/internal/logic/parseresult"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	"github.com/744223454/taskpilot-server/internal/types"
+	parseworker "github.com/744223454/taskpilot-server/internal/worker/parsejob"
 	"github.com/744223454/taskpilot-server/model/documentmodel"
 	"github.com/744223454/taskpilot-server/model/parsejobmodel"
 	"github.com/744223454/taskpilot-server/model/parseresultmodel"
 	"github.com/744223454/taskpilot-server/model/projectmodel"
 	"github.com/744223454/taskpilot-server/model/taskmodel"
 	"github.com/744223454/taskpilot-server/model/usermodel"
+	"github.com/744223454/taskpilot-server/pkg/ai"
+	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
 	"github.com/744223454/taskpilot-server/pkg/database"
-	"github.com/jackc/pgx/v5"
+	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -160,6 +165,134 @@ func TestIntegrationDocumentSoftDeletePreservesProjectAndBlocksActiveJob(t *test
 	}
 }
 
+func TestIntegrationParseWorkerAndResultEditingFlow(t *testing.T) {
+	db := newIntegrationDB(t)
+	redisServer, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer redisServer.Close()
+
+	ctx := context.Background()
+	queue := cachepkg.NewParseJobQueue(cachepkg.NewRedis(redisServer.Addr(), ""), "taskpilot:test:parse_jobs", "test-workers")
+	serviceContext := &svc.ServiceContext{
+		DB:        db,
+		ParseJobs: queue,
+		Parser: fakeParser{result: ai.ParsedDocument{
+			Title:           "Parsed title",
+			Summary:         "Parsed summary",
+			Deliverables:    []string{"Report"},
+			KeyRequirements: []string{"Use Go"},
+			RiskWarnings:    []string{},
+			GeneratedTasks: []ai.GeneratedTask{{
+				Title:    "Write report",
+				Priority: "high",
+			}},
+			Model: "fake-model",
+		}},
+	}
+	user := createIntegrationUser(t, db, "worker@example.com")
+	document, err := documentlogic.NewService(ctx, serviceContext).CreateText(user.ID, &types.CreateTextDocumentRequest{
+		Title: "Worker parse test",
+		Text:  "Please write a report using Go.",
+	})
+	if err != nil {
+		t.Fatalf("CreateText() error = %v", err)
+	}
+	job, err := parsejoblogic.NewService(ctx, serviceContext).Create(user.ID, &types.CreateParseJobRequest{DocumentID: document.ID})
+	if err != nil {
+		t.Fatalf("Create parse job error = %v", err)
+	}
+
+	worker, err := parseworker.New(serviceContext)
+	if err != nil {
+		t.Fatalf("New worker error = %v", err)
+	}
+	if err := worker.ProcessJob(ctx, job.ID); err != nil {
+		t.Fatalf("ProcessJob() error = %v", err)
+	}
+	if err := worker.ProcessJob(ctx, job.ID); err != nil {
+		t.Fatalf("duplicate ProcessJob() error = %v", err)
+	}
+
+	storedJob, err := gorm.G[parsejobmodel.ParseJob](db).Where("id = ?", job.ID).First(ctx)
+	if err != nil || storedJob.Status != "success" || storedJob.FinishedAt == nil {
+		t.Fatalf("stored job = %#v, error = %v", storedJob, err)
+	}
+	resultCount, err := gorm.G[parseresultmodel.ParseResult](db).Where("parse_job_id = ?", job.ID).Count(ctx, "id")
+	if err != nil || resultCount != 1 {
+		t.Fatalf("result count = %d, error = %v", resultCount, err)
+	}
+
+	resultService := parseresultlogic.NewService(ctx, serviceContext)
+	result, err := resultService.GetByJob(user.ID, job.ID)
+	if err != nil {
+		t.Fatalf("GetByJob() error = %v", err)
+	}
+	updated, err := resultService.Update(user.ID, result.ID, &types.UpdateParseResultRequest{
+		Version:         result.Version,
+		Title:           " Updated title ",
+		Summary:         " Updated summary ",
+		Deliverables:    []string{"Report", "Report"},
+		KeyRequirements: []string{"Use Go"},
+		RiskWarnings:    []string{},
+		GeneratedTasks: []types.GeneratedTask{{
+			Title: "Revise report",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Version != result.Version+1 || updated.Title != "Updated title" || updated.GeneratedTasks[0].Priority != "medium" || len(updated.Deliverables) != 1 {
+		t.Fatalf("updated result = %#v", updated)
+	}
+	if _, err := resultService.Update(user.ID, result.ID, &types.UpdateParseResultRequest{
+		Version:         result.Version,
+		Title:           "Stale",
+		Summary:         "Stale",
+		Deliverables:    []string{},
+		KeyRequirements: []string{},
+		RiskWarnings:    []string{},
+		GeneratedTasks:  []types.GeneratedTask{},
+	}); !errors.Is(err, logicerrors.ErrConflict) {
+		t.Fatalf("stale Update() error = %v, want conflict", err)
+	}
+
+	confirmed, err := resultService.Confirm(user.ID, result.ID)
+	if err != nil || !confirmed.IsConfirmed {
+		t.Fatalf("Confirm() = %#v, %v", confirmed, err)
+	}
+	confirmedAgain, err := resultService.Confirm(user.ID, result.ID)
+	if err != nil || !confirmedAgain.IsConfirmed {
+		t.Fatalf("second Confirm() = %#v, %v", confirmedAgain, err)
+	}
+	if _, err := resultService.Update(user.ID, result.ID, &types.UpdateParseResultRequest{
+		Version:         confirmed.Version,
+		Title:           "No longer editable",
+		Summary:         "No longer editable",
+		Deliverables:    []string{},
+		KeyRequirements: []string{},
+		RiskWarnings:    []string{},
+		GeneratedTasks:  []types.GeneratedTask{},
+	}); !errors.Is(err, logicerrors.ErrInvalidState) {
+		t.Fatalf("confirmed Update() error = %v, want invalid state", err)
+	}
+
+	otherUser := createIntegrationUser(t, db, "other-worker@example.com")
+	if _, err := resultService.Get(otherUser.ID, result.ID); !errors.Is(err, logicerrors.ErrNotFound) {
+		t.Fatalf("other user Get() error = %v, want not found", err)
+	}
+}
+
+type fakeParser struct {
+	result ai.ParsedDocument
+	err    error
+}
+
+func (p fakeParser) Parse(context.Context, string) (ai.ParsedDocument, error) {
+	return p.result, p.err
+}
+
 func newIntegrationDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("TASKPILOT_TEST_DATABASE_DSN")
@@ -183,12 +316,14 @@ func newIntegrationDB(t *testing.T) *gorm.DB {
 		}
 	})
 
-	config, err := pgx.ParseConfig(dsn)
+	integrationURL, err := url.Parse(dsn)
 	if err != nil {
 		t.Fatalf("parse integration DSN: %v", err)
 	}
-	config.RuntimeParams["search_path"] = schema
-	db, err := database.NewPostgres(config.ConnString())
+	query := integrationURL.Query()
+	query.Set("search_path", schema)
+	integrationURL.RawQuery = query.Encode()
+	db, err := database.NewPostgres(integrationURL.String())
 	if err != nil {
 		t.Fatalf("connect integration schema: %v", err)
 	}

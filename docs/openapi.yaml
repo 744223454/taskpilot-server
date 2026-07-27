@@ -1,15 +1,15 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.3.1
+  version: 0.4.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
     说明：
     - 本文件托管在 `taskpilot-server` 仓库内，适合直接导入 Apifox 调试或通过 GitHub Raw URL 持续同步
     - 当前已实现接口统一返回响应信封 `{ code, message, data }`，错误响应的 `data` 为 `null`
-    - 未实现的业务接口（解析结果、项目、任务、历史等）暂未写入本规范
-    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大
+    - 未实现的业务接口（项目、任务、历史等）暂未写入本规范
+    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大, 10010=服务不可用, 10011=禁止访问
 servers:
   - url: http://localhost:8888
     description: Local development server
@@ -22,13 +22,15 @@ tags:
     description: 文档录入与查询
   - name: ParseJobs
     description: 解析任务创建与状态查询
+  - name: ParseResults
+    description: AI 解析结果查询、编辑与确认
 paths:
   /healthz:
     get:
       tags:
         - System
       summary: 健康检查
-      description: 返回服务是否存活，以及数据库连接是否已初始化。
+      description: 返回服务是否存活，以及数据库、Redis 和解析 Worker 是否就绪。
       operationId: getHealthz
       responses:
         "200":
@@ -45,6 +47,8 @@ paths:
                     data:
                       status: ok
                       db: true
+                      redis: true
+                      worker: true
   /from/{name}:
     get:
       tags:
@@ -1061,7 +1065,226 @@ paths:
                     code: 10005
                     message: internal server error
                     data: null
+  /api/v1/parse-jobs/{jobId}/result:
+    get:
+      tags: [ParseResults]
+      summary: 按解析任务查询结果
+      operationId: getParseResultByJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResultEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/parse-results/{resultId}:
+    get:
+      tags: [ParseResults]
+      summary: 查询解析结果
+      operationId: getParseResult
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ResultId"
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResultEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    put:
+      tags: [ParseResults]
+      summary: 编辑未确认解析结果
+      description: 使用 `version` 乐观锁更新；已确认结果不可编辑。
+      operationId: updateParseResult
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ResultId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateParseResultRequest"
+      responses:
+        "200":
+          description: 更新成功，返回版本加一后的结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResultEnvelope"
+        "400":
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: "version 已过期"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 结果已确认，不可编辑
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/parse-results/{resultId}/confirm:
+    post:
+      tags: [ParseResults]
+      summary: 确认解析结果
+      description: 首次调用将结果设为已确认；重复调用幂等返回当前结果。
+      operationId: confirmParseResult
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ResultId"
+      responses:
+        "200":
+          description: 确认成功或已确认
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResultEnvelope"
+        "400":
+          description: 路径参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
+  parameters:
+    ResultId:
+      name: resultId
+      in: path
+      required: true
+      description: 解析结果 ID
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
   securitySchemes:
     bearerAuth:
       type: http
@@ -1102,11 +1325,19 @@ components:
       required:
         - status
         - db
+        - redis
+        - worker
       properties:
         status:
           type: string
           example: ok
         db:
+          type: boolean
+          example: true
+        redis:
+          type: boolean
+          example: true
+        worker:
           type: boolean
           example: true
     HealthEnvelope:
@@ -1164,11 +1395,11 @@ components:
         email:
           type: string
           format: email
-          example: test@example.com
+          example: seed.dev01@taskpilot.1kuansi.cn
         password:
           type: string
           minLength: 8
-          example: "12345678"
+          example: "TP-12ddf1c35b9c480a21cc9df5"
     UserProfile:
       type: object
       required:
@@ -1371,6 +1602,101 @@ components:
         updated_at:
           type: string
           format: date-time
+    GeneratedTask:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        priority:
+          type: string
+          enum: [low, medium, high]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+    ParseResultFields:
+      type: object
+      required: [title, summary, deliverables, key_requirements, risk_warnings, generated_tasks]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        summary:
+          type: string
+          maxLength: 5000
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        deliverables:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 1000
+        key_requirements:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 1000
+        risk_warnings:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 1000
+        generated_tasks:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/GeneratedTask"
+    UpdateParseResultRequest:
+      allOf:
+        - $ref: "#/components/schemas/ParseResultFields"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              format: int32
+              minimum: 1
+    ParseResult:
+      allOf:
+        - $ref: "#/components/schemas/ParseResultFields"
+        - type: object
+          required: [id, document_id, parse_job_id, version, is_confirmed, created_at, updated_at]
+          properties:
+            id:
+              type: integer
+              format: int64
+            document_id:
+              type: integer
+              format: int64
+            parse_job_id:
+              type: integer
+              format: int64
+            ai_model:
+              type: string
+              nullable: true
+            version:
+              type: integer
+              format: int32
+              minimum: 1
+            is_confirmed:
+              type: boolean
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
     DocumentEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -1395,6 +1721,14 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ParseJob"
+    ParseResultEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/ParseResult"
     EmptyEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
