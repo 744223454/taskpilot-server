@@ -678,7 +678,7 @@ paths:
         - 文档不存在或不属于当前用户返回 404
         - 文档状态不是 `ready` 返回 422
         - 文档已存在 `pending` 或 `processing` 任务返回 409（由文档行锁和部分唯一索引共同保证）
-        - 创建成功后状态固定为 `pending`，后台 Redis worker 尚未接入
+        - 创建成功后状态固定为 `pending`，并通过 Redis 队列投递给后台 Worker 异步处理；任务成功（`status == success`）后可通过结果接口查询解析结果
       operationId: createParseJob
       security:
         - bearerAuth: []
@@ -872,7 +872,7 @@ paths:
       tags: [ParseJobs]
       summary: 重试失败的解析任务
       description: |
-        将 `failed` 状态的解析任务重置为 `pending`，`retry_count` 自增，并清空 `error_message`、`started_at`、`finished_at`。
+        将 `failed` 状态的解析任务重置为 `pending`，`retry_count` 自增，并清空 `error_message`、`started_at`、`finished_at`；重置后重新投递到 Redis 解析队列等待 Worker 重新处理。
 
         实际行为：
         - 任务不存在返回 404
@@ -1069,6 +1069,8 @@ paths:
     get:
       tags: [ParseResults]
       summary: 按解析任务查询结果
+      description: >-
+        按 `jobId` 查询其对应的解析结果。结果仅在解析任务达到 `success` 后生成；对于 `pending`/`processing`/`failed` 任务返回 404。一个解析任务唯一对应一个结果。
       operationId: getParseResultByJob
       security:
         - bearerAuth: []
@@ -1121,6 +1123,8 @@ paths:
     get:
       tags: [ParseResults]
       summary: 查询解析结果
+      description: >-
+        按结果主键 `resultId` 查询解析结果详情，返回结构与 `按解析任务查询结果` 一致。
       operationId: getParseResult
       security:
         - bearerAuth: []
