@@ -18,6 +18,8 @@ func writeAuthError(c *gin.Context, svcCtx *svc.ServiceContext, err error) {
 		response.Error(c, http.StatusConflict, bizerrors.CodeEmailRegistered, err.Error())
 	case errors.Is(err, authlogic.ErrInvalidCredentials), errors.Is(err, authlogic.ErrInvalidAccessToken):
 		response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, err.Error())
+	case errors.Is(err, authlogic.ErrInvalidRefreshToken), errors.Is(err, authlogic.ErrRefreshTokenReused):
+		response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, "invalid or expired refresh token")
 	default:
 		common.WriteError(c, svcCtx.Logger, err)
 	}

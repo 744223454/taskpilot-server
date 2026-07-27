@@ -25,6 +25,9 @@ func WriteError(c *gin.Context, logger *slog.Logger, err error) {
 		response.Error(c, http.StatusUnprocessableEntity, bizerrors.CodeInvalidState, err.Error())
 	case errors.Is(err, logicerrors.ErrDatabaseUnavailable):
 		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeDatabaseUnavailable, err.Error())
+	case errors.Is(err, logicerrors.ErrCacheUnavailable):
+		logUnexpectedError(c, logger, err)
+		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeServiceUnavailable, logicerrors.ErrCacheUnavailable.Error())
 	default:
 		logUnexpectedError(c, logger, err)
 		response.Error(c, http.StatusInternalServerError, bizerrors.CodeInternalError, "internal server error")

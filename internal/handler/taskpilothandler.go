@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/744223454/taskpilot-server/internal/logic"
 	"github.com/744223454/taskpilot-server/internal/svc"
@@ -14,6 +16,7 @@ import (
 type healthResponse struct {
 	Status string `json:"status"`
 	DB     bool   `json:"db"`
+	Redis  bool   `json:"redis"`
 }
 
 func TaskpilotHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
@@ -35,9 +38,16 @@ func TaskpilotHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 
 func HealthHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		redisReady := false
+		if svcCtx.Redis != nil {
+			pingContext, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
+			defer cancel()
+			redisReady = svcCtx.Redis.Ping(pingContext).Err() == nil
+		}
 		response.Success(c, http.StatusOK, healthResponse{
 			Status: "ok",
 			DB:     svcCtx.DB != nil,
+			Redis:  redisReady,
 		})
 	}
 }

@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 
+	"github.com/744223454/taskpilot-server/internal/handler/common"
 	authlogic "github.com/744223454/taskpilot-server/internal/logic/auth"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	"github.com/744223454/taskpilot-server/internal/types"
@@ -24,7 +25,11 @@ func LoginHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 			writeAuthError(c, svcCtx, err)
 			return
 		}
+		if err := setSessionCookies(c, svcCtx, resp); err != nil {
+			common.WriteError(c, svcCtx.Logger, err)
+			return
+		}
 
-		response.Success(c, http.StatusOK, resp)
+		response.Success(c, http.StatusOK, resp.Response)
 	}
 }
