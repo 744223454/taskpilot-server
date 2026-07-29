@@ -83,6 +83,8 @@ apply_incremental_migrations() {
 	echo "applying incremental database migrations to $POSTGRES_DB via $POSTGRES_CONTAINER"
 	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 		< "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
+	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+		< "$ROOT_DIR/scripts/migrate_projects_parse_result_unique.sql"
 }
 
 compose config --quiet

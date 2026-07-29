@@ -19,19 +19,44 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		JWT: jwtauth.NewManager("test-secret", 3600),
 	})
 
-	for _, path := range []string{
-		"/api/v1/users/me",
-		"/api/v1/documents",
-		"/api/v1/parse-jobs/1/result",
-		"/api/v1/parse-results/1",
+	for _, testCase := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/users/me"},
+		{method: http.MethodGet, path: "/api/v1/documents"},
+		{method: http.MethodGet, path: "/api/v1/parse-jobs/1/result"},
+		{method: http.MethodGet, path: "/api/v1/parse-results/1"},
+		{method: http.MethodPost, path: "/api/v1/projects"},
 	} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := httptest.NewRequest(testCase.method, testCase.path, nil)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
 
 		if response.Code != http.StatusUnauthorized {
-			t.Fatalf("GET %s status = %d, want %d", path, response.Code, http.StatusUnauthorized)
+			t.Fatalf("%s %s status = %d, want %d", testCase.method, testCase.path, response.Code, http.StatusUnauthorized)
 		}
+	}
+}
+
+func TestCreateProjectRejectsWhitespaceName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwtManager := jwtauth.NewManager("test-secret", 3600)
+	router := gin.New()
+	RegisterRoutes(router, &svc.ServiceContext{JWT: jwtManager})
+
+	token, err := jwtManager.GenerateToken(jwtauth.Claims{UserID: 1})
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewBufferString(`{"parse_result_id":1,"name":"   "}`))
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v1/projects status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
 

@@ -16,7 +16,7 @@ services:
       redis:
         condition: service_started
     networks:
-      - default
+      - taskpilot_dev_net
       - taskpilot_prod_net
 
 networks:

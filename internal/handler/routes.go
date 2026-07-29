@@ -1,24 +1,32 @@
 package handler
 
 import (
+	"time"
+
 	authhandler "github.com/744223454/taskpilot-server/internal/handler/auth"
 	documenthandler "github.com/744223454/taskpilot-server/internal/handler/document"
 	"github.com/744223454/taskpilot-server/internal/handler/middleware"
 	parsejobhandler "github.com/744223454/taskpilot-server/internal/handler/parsejob"
 	parseresulthandler "github.com/744223454/taskpilot-server/internal/handler/parseresult"
+	projecthandler "github.com/744223454/taskpilot-server/internal/handler/project"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	"github.com/gin-gonic/gin"
 )
 
+const requestTimeout = 30 * time.Second
+
 // RegisterRoutes wires all HTTP endpoints onto the Gin engine.
 func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	router.Use(middleware.CORS(serverCtx.Config.CORS.AllowedOrigins))
+	router.Use(middleware.Secure(serverCtx.Config.Auth.CookieSecure))
+	router.Use(middleware.Timeout(requestTimeout))
 
 	router.GET("/healthz", HealthHandler(serverCtx))
 	router.GET("/from/:name", TaskpilotHandler(serverCtx))
 
 	api := router.Group("/api/v1")
+	api.Use(middleware.NoCache())
 	api.POST("/auth/register", authhandler.RegisterHandler(serverCtx))
 	api.POST("/auth/login", authhandler.LoginHandler(serverCtx))
 	api.POST("/auth/refresh", middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.RefreshHandler(serverCtx))
@@ -40,4 +48,5 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.GET("/parse-results/:resultId", parseresulthandler.GetHandler(serverCtx))
 	protected.PUT("/parse-results/:resultId", parseresulthandler.UpdateHandler(serverCtx))
 	protected.POST("/parse-results/:resultId/confirm", parseresulthandler.ConfirmHandler(serverCtx))
+	protected.POST("/projects", projecthandler.CreateHandler(serverCtx))
 }
