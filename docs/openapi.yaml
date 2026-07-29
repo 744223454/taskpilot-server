@@ -1,14 +1,16 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.4.0
+  version: 0.6.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
     说明：
     - 本文件托管在 `taskpilot-server` 仓库内，适合直接导入 Apifox 调试或通过 GitHub Raw URL 持续同步
     - 当前已实现接口统一返回响应信封 `{ code, message, data }`，错误响应的 `data` 为 `null`
-    - 未实现的业务接口（项目、任务、历史等）暂未写入本规范
+    - 受保护接口支持 Bearer Token 或 `access_token` Cookie；Cookie 鉴权的写请求还必须携带与 `csrf_token` Cookie 相同的 `X-CSRF-Token`
+    - `/auth/refresh` 与 `/auth/logout` 强制使用 `refresh_token` Cookie 和 CSRF Header
+    - 未实现的项目管理、任务管理和历史接口暂未写入本规范
     - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大, 10010=服务不可用, 10011=禁止访问
 servers:
   - url: http://localhost:8888
@@ -24,6 +26,8 @@ tags:
     description: 解析任务创建与状态查询
   - name: ParseResults
     description: AI 解析结果查询、编辑与确认
+  - name: Projects
+    description: 将已确认解析结果保存为项目
 paths:
   /healthz:
     get:
@@ -95,11 +99,12 @@ paths:
         - Auth
       summary: 用户注册
       description: |
-        注册新用户并签发 JWT。
+        注册新用户、创建 Redis Refresh 会话，并签发 JWT。
 
         实际行为：
         - 服务端会对邮箱执行 `trim + lower`
         - 若邮箱已存在，返回 409
+        - 成功时设置 `access_token`、`refresh_token`、`csrf_token` Cookie
         - 成功时返回统一响应信封，`data` 为 `AuthResponse`
       operationId: postAuthRegister
       requestBody:
@@ -146,7 +151,7 @@ paths:
                     message: email already registered
                     data: null
         "503":
-          description: 数据库未连接
+          description: 数据库或 Redis Refresh 会话不可用
           content:
             application/json:
               schema:
@@ -175,11 +180,12 @@ paths:
         - Auth
       summary: 用户登录
       description: |
-        使用邮箱和密码登录并签发 JWT。
+        使用邮箱和密码登录、创建 Redis Refresh 会话，并签发 JWT。
 
         实际行为：
         - 服务端会对邮箱执行 `trim + lower`
         - 邮箱不存在和密码错误统一返回 401
+        - 成功时设置 `access_token`、`refresh_token`、`csrf_token` Cookie
       operationId: postAuthLogin
       requestBody:
         required: true
@@ -190,7 +196,7 @@ paths:
             examples:
               default:
                 value:
-                  email: test
+                  email: test@example.com
                   password: "12345678"
       responses:
         "200":
@@ -224,7 +230,7 @@ paths:
                     message: invalid email or password
                     data: null
         "503":
-          description: 数据库未连接
+          description: 数据库或 Redis Refresh 会话不可用
           content:
             application/json:
               schema:
@@ -247,6 +253,96 @@ paths:
                     code: 10005
                     message: internal server error
                     data: null
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: 刷新认证会话
+      description: |
+        原子消费并轮换当前 `refresh_token`，签发新的 Access/Refresh Cookie 与 CSRF Cookie。
+
+        Refresh 会话使用登录时确定的绝对过期时间，刷新不会延长总期限；旧令牌重放会使当前设备会话失效。
+      operationId: postAuthRefresh
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFToken"
+      responses:
+        "200":
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+        "401":
+          description: Refresh Token 缺失、过期、无效或被重放
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: CSRF Cookie/Header 缺失或不匹配
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Redis Refresh 会话不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: 退出当前设备
+      description: |
+        撤销当前设备的 Refresh 会话并清除 Access/Refresh/CSRF Cookie，不影响其他设备。
+
+        已签发的 Access JWT 不加入黑名单，可能继续有效到其自然过期；即使 Redis 撤销失败，响应前也会清除浏览器 Cookie。
+      operationId: postAuthLogout
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFToken"
+      responses:
+        "200":
+          description: 退出成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyEnvelope"
+        "401":
+          description: Refresh Token 缺失、过期或无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: CSRF Cookie/Header 缺失或不匹配
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Redis Refresh 会话不可用；Cookie 仍会被清除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/users/me:
     get:
       tags:
@@ -261,6 +357,7 @@ paths:
       operationId: getCurrentUser
       security:
         - bearerAuth: []
+        - accessCookie: []
       responses:
         "200":
           description: 查询成功
@@ -333,6 +430,7 @@ paths:
       operationId: createTextDocument
       security:
         - bearerAuth: []
+        - accessCookie: []
       requestBody:
         required: true
         content:
@@ -424,6 +522,7 @@ paths:
       operationId: listDocuments
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - name: page
           in: query
@@ -513,6 +612,7 @@ paths:
       operationId: getDocument
       security:
         - bearerAuth: []
+        - accessCookie: []
       responses:
         "200":
           description: 查询成功
@@ -588,6 +688,7 @@ paths:
       operationId: deleteDocument
       security:
         - bearerAuth: []
+        - accessCookie: []
       responses:
         "200":
           description: 删除成功
@@ -678,10 +779,11 @@ paths:
         - 文档不存在或不属于当前用户返回 404
         - 文档状态不是 `ready` 返回 422
         - 文档已存在 `pending` 或 `processing` 任务返回 409（由文档行锁和部分唯一索引共同保证）
-        - 创建成功后状态固定为 `pending`，后台 Redis worker 尚未接入
+        - 创建成功后状态固定为 `pending`，并通过 Redis 队列投递给后台 Worker 异步处理；任务成功（`status == success`）后可通过结果接口查询解析结果
       operationId: createParseJob
       security:
         - bearerAuth: []
+        - accessCookie: []
       requestBody:
         required: true
         content:
@@ -791,6 +893,7 @@ paths:
       operationId: getParseJob
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - name: jobId
           in: path
@@ -872,7 +975,7 @@ paths:
       tags: [ParseJobs]
       summary: 重试失败的解析任务
       description: |
-        将 `failed` 状态的解析任务重置为 `pending`，`retry_count` 自增，并清空 `error_message`、`started_at`、`finished_at`。
+        将 `failed` 状态的解析任务重置为 `pending`，`retry_count` 自增，并清空 `error_message`、`started_at`、`finished_at`；重置后重新投递到 Redis 解析队列等待 Worker 重新处理。
 
         实际行为：
         - 任务不存在返回 404
@@ -881,6 +984,7 @@ paths:
       operationId: retryParseJob
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - name: jobId
           in: path
@@ -989,6 +1093,7 @@ paths:
       operationId: getLatestDocumentParseJob
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - name: documentId
           in: path
@@ -1069,9 +1174,12 @@ paths:
     get:
       tags: [ParseResults]
       summary: 按解析任务查询结果
+      description: >-
+        按 `jobId` 查询其对应的解析结果。结果仅在解析任务达到 `success` 后生成；对于 `pending`/`processing`/`failed` 任务返回 404。一个解析任务唯一对应一个结果。
       operationId: getParseResultByJob
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - name: jobId
           in: path
@@ -1121,9 +1229,12 @@ paths:
     get:
       tags: [ParseResults]
       summary: 查询解析结果
+      description: >-
+        按结果主键 `resultId` 查询解析结果详情，返回结构与 `按解析任务查询结果` 一致。
       operationId: getParseResult
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - $ref: "#/components/parameters/ResultId"
       responses:
@@ -1170,6 +1281,7 @@ paths:
       operationId: updateParseResult
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - $ref: "#/components/parameters/ResultId"
       requestBody:
@@ -1235,6 +1347,7 @@ paths:
       operationId: confirmParseResult
       security:
         - bearerAuth: []
+        - accessCookie: []
       parameters:
         - $ref: "#/components/parameters/ResultId"
       responses:
@@ -1274,8 +1387,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects:
+    post:
+      tags: [Projects]
+      summary: 将解析结果保存为项目
+      description: |
+        读取当前用户已确认的解析结果，在同一数据库事务内创建项目，并将 `generated_tasks` 快照展开为初始任务。
+
+        同一解析结果只能创建一个项目。首次创建返回 201；重复或并发请求返回首次创建的项目和任务，状态码为 200，且不会使用重复请求中的新名称覆盖已有项目。
+      operationId: createProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+            examples:
+              default:
+                value:
+                  parse_result_id: 9001
+                  name: 创新创业比赛报名项目
+      responses:
+        "201":
+          description: 首次创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateProjectEnvelope"
+        "200":
+          description: 该解析结果已创建项目，幂等返回已有项目及任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateProjectEnvelope"
+        "400":
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 解析结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 解析结果未确认，或任务快照无法生成合法任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   parameters:
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: 必须与浏览器中的 `csrf_token` Cookie 原值一致。
+      schema:
+        type: string
     ResultId:
       name: resultId
       in: path
@@ -1290,6 +1482,14 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: access_token
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
   schemas:
     Envelope:
       type: object
@@ -1320,6 +1520,17 @@ components:
           type: object
           nullable: true
           example: null
+    EmptyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              nullable: true
+              example: null
     HealthPayload:
       type: object
       required:
@@ -1437,7 +1648,7 @@ components:
         expires_in_sec:
           type: integer
           format: int64
-          example: 86400
+          example: 900
     AuthEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -1697,6 +1908,101 @@ components:
             updated_at:
               type: string
               format: date-time
+    CreateProjectRequest:
+      type: object
+      required: [parse_result_id, name]
+      properties:
+        parse_result_id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+    Project:
+      type: object
+      required: [id, source_document_id, parse_result_id, name, description, deadline, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        source_document_id:
+          type: integer
+          format: int64
+        parse_result_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [active, archived, deleted]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Task:
+      type: object
+      required: [id, project_id, source_parse_result_id, title, description, status, priority, deadline, sort_order, source_type, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        project_id:
+          type: integer
+          format: int64
+        source_parse_result_id:
+          type: integer
+          format: int64
+          nullable: true
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [todo, doing, done]
+        priority:
+          type: string
+          enum: [low, medium, high]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        sort_order:
+          type: integer
+          format: int32
+          minimum: 0
+        source_type:
+          type: string
+          enum: [ai, manual]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateProjectPayload:
+      type: object
+      required: [project, tasks]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
     DocumentEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -1729,11 +2035,11 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ParseResult"
-    EmptyEnvelope:
+    CreateProjectEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
           required: [data]
           properties:
             data:
-              type: object
+              $ref: "#/components/schemas/CreateProjectPayload"

@@ -2,6 +2,8 @@ package svc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -55,4 +57,26 @@ func NewServiceContext(c config.Config) *ServiceContext {
 		logger.Warn("redis initialization failed", "error", err)
 	}
 	return serverContext
+}
+
+func (s *ServiceContext) Close() error {
+	if s == nil {
+		return nil
+	}
+
+	var closeErrors []error
+	if s.Redis != nil {
+		if err := s.Redis.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close redis client: %w", err))
+		}
+	}
+	if s.DB != nil {
+		sqlDB, err := s.DB.DB()
+		if err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("get postgres connection pool: %w", err))
+		} else if err := sqlDB.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close postgres connection pool: %w", err))
+		}
+	}
+	return errors.Join(closeErrors...)
 }

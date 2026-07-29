@@ -32,7 +32,19 @@ chmod +x scripts/deploy_prod.sh
 ./scripts/deploy_prod.sh
 ```
 
-部署脚本会先校验 Worker AI Key，在 PostgreSQL 就绪后自动执行幂等增量迁移，再构建一个同时包含 API 与 Worker 二进制的共享镜像，并更新两个容器。迁移失败时部署会立即停止，旧容器继续运行。
+部署脚本会先校验 Worker AI Key，在 PostgreSQL 就绪后自动执行基础建表（仅新库）、文档软删除/活跃解析任务唯一约束，以及项目来源结果唯一约束增量迁移，再构建一个同时包含 API 与 Worker 二进制的共享镜像，并更新两个容器。迁移失败时部署会立即停止，旧容器继续运行。
+
+当前脚本**不会**自动执行 `scripts/migrate_users_email_normalized.sql`。如果目标数据库来自旧版本，仍可能保留大小写敏感的 `users_email_key`；首次升级前应显式执行：
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot \
+  < scripts/migrate_users_email_normalized.sql
+```
+
+新建数据库的 `scripts/migrate.sql` 已直接创建 `LOWER(email)` 唯一索引，不需要额外执行该迁移。后续新增增量迁移时，应同步更新生产和开发部署脚本，避免“SQL 已入库但部署未执行”。
+
+`scripts/migrate_projects_parse_result_unique.sql` 会检查同一 `parse_result_id` 是否已有多个项目。检测到重复时迁移会停止并保留全部数据，不会自动删除或合并；处理重复数据后再重新发布。
 
 ## 生产配置模型
 
@@ -54,6 +66,8 @@ Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
 - `TASKPILOT_AI_MODEL`，默认 `gpt-5.4`
 - `TASKPILOT_AI_REQUEST_TIMEOUT`，默认整次解析 `180` 秒
 - `TASKPILOT_AI_MAX_OUTPUT_TOKENS`，默认 `8000`
+
+Worker 的队列、租约、恢复、心跳和停止参数默认放在 YAML 中，也可通过 `TASKPILOT_WORKER_*` 环境变量覆盖；完整清单以 `internal/config/config.go` 和工作区根目录 `docs/development.md` 为准。环境变量数值无法解析时当前实现会回退 YAML 值，发布后应通过日志和 `/healthz` 核对运行状态。
 
 这样做的好处是：既能让应用保持稳定的 YAML 配置结构，又能避免把生产密钥直接提交到 Git。
 
@@ -92,7 +106,7 @@ git pull --ff-only origin dev
 sh ./scripts/deploy_dev.sh
 ```
 
-开发部署脚本使用服务器已有且不提交的 `docker-compose.dev.yml`，叠加仓库内的 `docker-compose.dev.worker.yml`，重新构建共享镜像并启动开发 `app`、`worker` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器对 `taskpilot_dev` 执行幂等增量迁移，然后更新两个应用进程。
+开发部署脚本使用服务器已有且不提交的 `docker-compose.dev.yml`，叠加仓库内的 `docker-compose.dev.worker.yml`，重新构建共享镜像并启动开发 `app`、`worker` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器对 `taskpilot_dev` 执行文档软删除/活跃解析任务唯一约束和项目来源结果唯一约束迁移，然后更新两个应用进程。旧开发库的邮箱规范化迁移同样需要显式执行。
 
 脚本默认使用以下值，必要时可在执行脚本前覆盖：
 
@@ -127,5 +141,9 @@ POSTGRES_DB=taskpilot_dev \
 ## 反向代理示例
 
 反向代理需要把你选定的子域名转发到 `http://127.0.0.1:8888`。
+
+当 `TASKPILOT_AUTH_COOKIE_SECURE=true` 时，应用会强制 HTTPS：反向代理必须传递真实协议，例如 Nginx 配置 `proxy_set_header X-Forwarded-Proto $scheme;`。HTTPS 请求会返回 HSTS 响应头，未标记为 HTTPS 的请求会收到 `308` 跳转；代理层也应在流量进入应用前完成 HTTP 到 HTTPS 的跳转。
+
+API 进程设置了请求头、读写、空闲连接和业务请求超时，并在收到 `SIGINT`/`SIGTERM` 后优雅停止 HTTP 服务，再关闭 PostgreSQL 与 Redis 客户端。所有 `/api/v1` 响应都会设置禁止缓存响应头。
 
 PostgreSQL 和 Redis 不需要直接暴露到公网。

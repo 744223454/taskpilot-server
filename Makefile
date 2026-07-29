@@ -1,4 +1,4 @@
-.PHONY: run run-worker build test tidy fmt migrate migrate-users-email-normalized migrate-documents-soft-delete-parse-jobs-unique docker-build prod-up prod-down prod-deploy migrate-prod
+.PHONY: run run-worker build test tidy fmt migrate migrate-users-email-normalized migrate-documents-soft-delete-parse-jobs-unique migrate-projects-parse-result-unique docker-build prod-up prod-down prod-deploy migrate-prod
 
 APP := taskpilot
 CONFIG ?= etc/taskpilot-api.yaml
@@ -33,6 +33,9 @@ migrate-users-email-normalized:
 
 migrate-documents-soft-delete-parse-jobs-unique:
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < scripts/migrate_documents_soft_delete_parse_jobs_unique.sql
+
+migrate-projects-parse-result-unique:
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < scripts/migrate_projects_parse_result_unique.sql
 
 docker-build:
 	docker build -t $(APP):local .
