@@ -2,7 +2,7 @@
 
 基于 `Gin + Gorm + PostgreSQL` 的 TaskPilot 后端服务仓库。
 
-当前阶段已经打通“文本文档 -> 异步 AI 解析 -> 结果编辑确认”的后端闭环，并可直接部署到单台云服务器上的 Docker Compose 环境。
+当前阶段已经打通“文本文档 -> 异步 AI 解析 -> 结果编辑确认 -> 保存项目并生成初始任务”的后端链路，并可部署到单台云服务器上的 Docker Compose 环境；项目与任务管理接口尚未实现，因此完整 MVP 后端闭环仍未完成。
 
 ## 当前状态
 
@@ -15,6 +15,7 @@
 - Redis Streams 解析队列与独立 Worker 进程
 - SoruxGPT `/responses` 严格 JSON Schema 结构化解析
 - 解析结果查询、乐观锁编辑与幂等确认
+- 已确认解析结果幂等保存为项目，并在同一事务内生成初始任务
 - 统一响应信封
 - 本地数据库初始化脚本
 - 生产部署基础资产：
@@ -26,9 +27,12 @@
 
 待补充：
 
-- PDF 上传、文件存储和文本提取
-- 项目与任务管理接口
-- Redis 状态缓存和登录限流
+- P0：项目 CRUD、任务 CRUD/状态/排序，以及相应权限与集成测试
+- P0：同步 OpenAPI 和前端 API，完成文本主链路端到端回归
+- P1：PDF 上传、文件存储和文字型 PDF 文本提取
+- P1/P2：历史记录、当前用户资料修改、登录限流；解析状态缓存按性能数据决定
+
+项目创建采用一个解析结果只生成一个项目的幂等契约，并由 `uq_projects_parse_result_id` 唯一索引兜底。首次创建返回 `201`；重复或并发请求返回首次项目与任务，状态码为 `200`。
 
 ## 目录结构
 
@@ -63,10 +67,13 @@ taskpilot-server/
 cp etc/taskpilot-api.example.yaml etc/taskpilot-api.yaml
 ```
 
-2. 如需通过环境变量覆盖配置，再复制：
+2. 如需通过环境变量覆盖配置，可复制 `.env.example`，并在当前 Shell 显式加载；Go 进程和 Makefile 不会自动读取 `.env`：
 
 ```bash
 cp .env.example .env
+set -a
+. ./.env
+set +a
 ```
 
 3. 启动本地依赖：
@@ -124,10 +131,15 @@ etc/taskpilot-api.yaml
 - `TASKPILOT_AUTH_ACCESS_EXPIRE`
 - `TASKPILOT_AUTH_REFRESH_EXPIRE`
 - `TASKPILOT_AUTH_COOKIE_SECURE`
+- `TASKPILOT_CORS_ALLOWED_ORIGINS`
 - `TASKPILOT_AI_API_KEY`
 - `TASKPILOT_AI_BASE_URL`
 - `TASKPILOT_AI_MODEL`
+- `TASKPILOT_AI_REQUEST_TIMEOUT`
+- `TASKPILOT_AI_MAX_OUTPUT_TOKENS`
 - `TASKPILOT_WORKER_CONCURRENCY`
+- `TASKPILOT_WORKER_LEASE_TIMEOUT`
+- `TASKPILOT_WORKER_MAX_RECOVERIES`
 
 推荐做法：
 
@@ -157,6 +169,7 @@ GET  /api/v1/parse-jobs/:jobId/result
 GET  /api/v1/parse-results/:resultId
 PUT  /api/v1/parse-results/:resultId
 POST /api/v1/parse-results/:resultId/confirm
+POST /api/v1/projects
 ```
 
 文档、解析任务与解析结果接口兼容 Bearer Token，也支持 Access Cookie。使用 Cookie 鉴权的写请求必须携带 `X-CSRF-Token`。解析任务落库后会发布到 Redis Streams，由独立 Worker 推进 `pending -> processing -> success / failed`；发布失败由 Worker 的 PostgreSQL 对账循环补偿。
@@ -165,11 +178,14 @@ POST /api/v1/parse-results/:resultId/confirm
 
 文本文档请求体上限为 `256 KiB`，正文最多 `50,000` 个 Unicode 字符。删除文档采用软删除，存在活跃解析任务时会返回冲突，已生成项目和任务不会被级联删除。
 
-生产和开发部署脚本会在更新应用容器前自动执行幂等增量迁移。仅本地手动升级已有数据库时执行：
+生产和开发部署脚本当前会在更新应用容器前自动执行文档软删除/活跃解析任务唯一约束迁移。仅本地手动升级已有数据库时执行：
 
 ```bash
 make migrate-documents-soft-delete-parse-jobs-unique
+make migrate-projects-parse-result-unique
 ```
+
+邮箱规范化迁移 `scripts/migrate_users_email_normalized.sql` 当前未纳入部署脚本。新库的基础迁移已经包含 `LOWER(email)` 唯一索引；旧库升级时需要在发布前显式执行 `make migrate-users-email-normalized`（或在目标 Compose 中执行同一 SQL）。
 
 统一返回格式：
 
@@ -181,22 +197,19 @@ make migrate-documents-soft-delete-parse-jobs-unique
 }
 ```
 
-## GitHub 上传建议
+## 仓库与质量门槛
 
-如果你选择让 `taskpilot-server` 作为仓库根目录，那么这个目录现在已经适合作为独立仓库：
+`taskpilot-server/` 已是独立 Git 仓库。日常修改在该目录内查看状态与历史；上层工作区根目录不是 Git 仓库。
 
-- 本地缓存和产物已被忽略
-- 本地配置与生产配置模板已拆分
-- README 已按独立仓库口径整理
-- 已补好部署与发布基础文件
-
-后续只需要在 `taskpilot-server/` 下执行：
+提交后端变更前执行：
 
 ```bash
-git init -b main
-git add .
-git commit -m "chore: bootstrap taskpilot-server repository"
+make fmt
+make test
+make tidy
 ```
+
+真实 PostgreSQL 集成测试只有在设置 `TASKPILOT_TEST_DATABASE_DSN` 时运行；普通 `make test` 未设置时会跳过这些场景。
 
 ## 云服务器部署
 

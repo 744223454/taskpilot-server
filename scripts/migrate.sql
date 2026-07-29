@@ -128,7 +128,7 @@ CREATE TABLE projects (
 
 CREATE INDEX idx_projects_user_id ON projects(user_id);
 CREATE INDEX idx_projects_source_document_id ON projects(source_document_id);
-CREATE INDEX idx_projects_parse_result_id ON projects(parse_result_id);
+CREATE UNIQUE INDEX uq_projects_parse_result_id ON projects(parse_result_id);
 
 CREATE TABLE tasks (
     id BIGSERIAL PRIMARY KEY,

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	documentlogic "github.com/744223454/taskpilot-server/internal/logic/document"
 	parsejoblogic "github.com/744223454/taskpilot-server/internal/logic/parsejob"
 	parseresultlogic "github.com/744223454/taskpilot-server/internal/logic/parseresult"
+	projectlogic "github.com/744223454/taskpilot-server/internal/logic/project"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	"github.com/744223454/taskpilot-server/internal/types"
 	parseworker "github.com/744223454/taskpilot-server/internal/worker/parsejob"
@@ -284,6 +286,157 @@ func TestIntegrationParseWorkerAndResultEditingFlow(t *testing.T) {
 	}
 }
 
+func TestIntegrationCreateProjectFromConfirmedResultIsIdempotent(t *testing.T) {
+	db := newIntegrationDB(t)
+	ctx := context.Background()
+	serviceContext := &svc.ServiceContext{DB: db}
+	user := createIntegrationUser(t, db, "project@example.com")
+	result := createIntegrationParseResult(t, db, user.ID, true, json.RawMessage(`[
+		{"title":" First task ","description":" Prepare deliverable ","priority":"","deadline":null},
+		{"title":"Second task","priority":"high","deadline":"2030-01-02T03:04:05Z"}
+	]`))
+
+	service := projectlogic.NewService(ctx, serviceContext)
+	createdProject, created, err := service.Create(user.ID, &types.CreateProjectRequest{
+		ParseResultID: result.ID,
+		Name:          "  Launch project  ",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !created || createdProject.Project.Name != "Launch project" || createdProject.Project.Description == nil || *createdProject.Project.Description != result.Summary || createdProject.Project.Status != "active" {
+		t.Fatalf("created project = %#v, created = %v", createdProject, created)
+	}
+	if len(createdProject.Tasks) != 2 {
+		t.Fatalf("tasks = %#v", createdProject.Tasks)
+	}
+	firstTask := createdProject.Tasks[0]
+	if firstTask.Title != "First task" || firstTask.Description == nil || *firstTask.Description != "Prepare deliverable" || firstTask.Priority != "medium" || firstTask.Status != "todo" || firstTask.SourceType != "ai" || firstTask.SortOrder != 0 || firstTask.SourceParseResultID == nil || *firstTask.SourceParseResultID != result.ID {
+		t.Fatalf("first task = %#v", firstTask)
+	}
+	if createdProject.Tasks[1].Priority != "high" || createdProject.Tasks[1].SortOrder != 1 || createdProject.Tasks[1].Deadline == nil {
+		t.Fatalf("second task = %#v", createdProject.Tasks[1])
+	}
+
+	existingProject, createdAgain, err := service.Create(user.ID, &types.CreateProjectRequest{
+		ParseResultID: result.ID,
+		Name:          "Ignored replacement name",
+	})
+	if err != nil {
+		t.Fatalf("second Create() error = %v", err)
+	}
+	if createdAgain || existingProject.Project.ID != createdProject.Project.ID || existingProject.Project.Name != "Launch project" || len(existingProject.Tasks) != 2 || existingProject.Tasks[0].ID != createdProject.Tasks[0].ID {
+		t.Fatalf("existing project = %#v, created = %v", existingProject, createdAgain)
+	}
+
+	projectCount, err := gorm.G[projectmodel.Project](db).Where("parse_result_id = ?", result.ID).Count(ctx, "id")
+	if err != nil || projectCount != 1 {
+		t.Fatalf("project count = %d, error = %v", projectCount, err)
+	}
+	taskCount, err := gorm.G[taskmodel.Task](db).Where("project_id = ?", createdProject.Project.ID).Count(ctx, "id")
+	if err != nil || taskCount != 2 {
+		t.Fatalf("task count = %d, error = %v", taskCount, err)
+	}
+
+	otherUser := createIntegrationUser(t, db, "project-other@example.com")
+	if _, _, err := service.Create(otherUser.ID, &types.CreateProjectRequest{ParseResultID: result.ID, Name: "Forbidden"}); !errors.Is(err, logicerrors.ErrNotFound) {
+		t.Fatalf("other user Create() error = %v, want not found", err)
+	}
+}
+
+func TestIntegrationCreateProjectAllowsEmptyTasksAndRollsBackInvalidState(t *testing.T) {
+	db := newIntegrationDB(t)
+	ctx := context.Background()
+	serviceContext := &svc.ServiceContext{DB: db}
+	user := createIntegrationUser(t, db, "project-state@example.com")
+	service := projectlogic.NewService(ctx, serviceContext)
+
+	emptyResult := createIntegrationParseResult(t, db, user.ID, true, json.RawMessage(`[]`))
+	emptyProject, created, err := service.Create(user.ID, &types.CreateProjectRequest{ParseResultID: emptyResult.ID, Name: "Empty project"})
+	if err != nil || !created || emptyProject.Tasks == nil || len(emptyProject.Tasks) != 0 {
+		t.Fatalf("empty Create() = %#v, %v, %v", emptyProject, created, err)
+	}
+
+	unconfirmed := createIntegrationParseResult(t, db, user.ID, false, json.RawMessage(`[]`))
+	if _, _, err := service.Create(user.ID, &types.CreateProjectRequest{ParseResultID: unconfirmed.ID, Name: "Unconfirmed"}); !errors.Is(err, logicerrors.ErrInvalidState) {
+		t.Fatalf("unconfirmed Create() error = %v, want invalid state", err)
+	}
+
+	invalid := createIntegrationParseResult(t, db, user.ID, true, json.RawMessage(`[{"title":"Broken","priority":"urgent"}]`))
+	if _, _, err := service.Create(user.ID, &types.CreateProjectRequest{ParseResultID: invalid.ID, Name: "Invalid"}); !errors.Is(err, logicerrors.ErrInvalidState) {
+		t.Fatalf("invalid Create() error = %v, want invalid state", err)
+	}
+	invalidProjectCount, err := gorm.G[projectmodel.Project](db).Where("parse_result_id IN (?, ?)", unconfirmed.ID, invalid.ID).Count(ctx, "id")
+	if err != nil || invalidProjectCount != 0 {
+		t.Fatalf("invalid project count = %d, error = %v", invalidProjectCount, err)
+	}
+}
+
+func TestIntegrationConcurrentProjectCreationReturnsOneProject(t *testing.T) {
+	db := newIntegrationDB(t)
+	ctx := context.Background()
+	serviceContext := &svc.ServiceContext{DB: db}
+	user := createIntegrationUser(t, db, "project-concurrent@example.com")
+	result := createIntegrationParseResult(t, db, user.ID, true, json.RawMessage(`[{"title":"Only task","priority":"medium"}]`))
+
+	const requests = 8
+	type createResult struct {
+		projectID int64
+		created   bool
+		err       error
+	}
+	start := make(chan struct{})
+	results := make(chan createResult, requests)
+	var waitGroup sync.WaitGroup
+	for index := range requests {
+		waitGroup.Add(1)
+		go func(requestIndex int) {
+			defer waitGroup.Done()
+			<-start
+			response, created, err := projectlogic.NewService(ctx, serviceContext).Create(user.ID, &types.CreateProjectRequest{
+				ParseResultID: result.ID,
+				Name:          fmt.Sprintf("Project %d", requestIndex),
+			})
+			projectID := int64(0)
+			if response != nil {
+				projectID = response.Project.ID
+			}
+			results <- createResult{projectID: projectID, created: created, err: err}
+		}(index)
+	}
+	close(start)
+	waitGroup.Wait()
+	close(results)
+
+	createdCount := 0
+	projectID := int64(0)
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent Create() error = %v", result.err)
+		}
+		if result.created {
+			createdCount++
+		}
+		if projectID == 0 {
+			projectID = result.projectID
+		}
+		if result.projectID != projectID {
+			t.Fatalf("project ID = %d, want %d", result.projectID, projectID)
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created count = %d, want 1", createdCount)
+	}
+	projectCount, err := gorm.G[projectmodel.Project](db).Where("parse_result_id = ?", result.ID).Count(ctx, "id")
+	if err != nil || projectCount != 1 {
+		t.Fatalf("project count = %d, error = %v", projectCount, err)
+	}
+	taskCount, err := gorm.G[taskmodel.Task](db).Where("project_id = ?", projectID).Count(ctx, "id")
+	if err != nil || taskCount != 1 {
+		t.Fatalf("task count = %d, error = %v", taskCount, err)
+	}
+}
+
 type fakeParser struct {
 	result ai.ParsedDocument
 	err    error
@@ -356,6 +509,50 @@ func createIntegrationUser(t *testing.T, db *gorm.DB, email string) usermodel.Us
 		t.Fatalf("create integration user: %v", err)
 	}
 	return user
+}
+
+func createIntegrationParseResult(t *testing.T, db *gorm.DB, userID int64, confirmed bool, generatedTasks json.RawMessage) parseresultmodel.ParseResult {
+	t.Helper()
+	ctx := context.Background()
+	title := "Project source"
+	content := "Create a project from this document."
+	document := documentmodel.Document{
+		UserID:     userID,
+		SourceType: "text",
+		Title:      &title,
+		RawText:    &content,
+		TextInput:  &content,
+		Status:     "ready",
+	}
+	if err := gorm.G[documentmodel.Document](db).Create(ctx, &document); err != nil {
+		t.Fatalf("create project source document: %v", err)
+	}
+	job := parsejobmodel.ParseJob{
+		UserID:     userID,
+		DocumentID: document.ID,
+		JobType:    "ai_parse",
+		Status:     "success",
+	}
+	if err := gorm.G[parsejobmodel.ParseJob](db).Create(ctx, &job); err != nil {
+		t.Fatalf("create project source job: %v", err)
+	}
+	result := parseresultmodel.ParseResult{
+		UserID:          userID,
+		DocumentID:      document.ID,
+		ParseJobID:      job.ID,
+		Title:           title,
+		Summary:         "Project summary",
+		Deliverables:    json.RawMessage(`[]`),
+		KeyRequirements: json.RawMessage(`[]`),
+		RiskWarnings:    json.RawMessage(`[]`),
+		GeneratedTasks:  generatedTasks,
+		Version:         1,
+		IsConfirmed:     confirmed,
+	}
+	if err := gorm.G[parseresultmodel.ParseResult](db).Create(ctx, &result); err != nil {
+		t.Fatalf("create project source result: %v", err)
+	}
+	return result
 }
 
 func randomHex(t *testing.T, size int) string {
