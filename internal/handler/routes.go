@@ -9,6 +9,7 @@ import (
 	parsejobhandler "github.com/744223454/taskpilot-server/internal/handler/parsejob"
 	parseresulthandler "github.com/744223454/taskpilot-server/internal/handler/parseresult"
 	projecthandler "github.com/744223454/taskpilot-server/internal/handler/project"
+	taskhandler "github.com/744223454/taskpilot-server/internal/handler/task"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	"github.com/gin-gonic/gin"
@@ -49,4 +50,20 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.PUT("/parse-results/:resultId", parseresulthandler.UpdateHandler(serverCtx))
 	protected.POST("/parse-results/:resultId/confirm", parseresulthandler.ConfirmHandler(serverCtx))
 	protected.POST("/projects", projecthandler.CreateHandler(serverCtx))
+	protected.GET("/projects", projecthandler.ListHandler(serverCtx))
+	protected.GET("/projects/:projectId", projecthandler.GetHandler(serverCtx))
+	protected.PUT("/projects/:projectId", projecthandler.UpdateHandler(serverCtx))
+	protected.POST("/projects/:projectId/archive", projecthandler.ArchiveHandler(serverCtx))
+	protected.POST("/projects/:projectId/unarchive", projecthandler.UnarchiveHandler(serverCtx))
+	protected.DELETE("/projects/:projectId", projecthandler.DeleteHandler(serverCtx))
+	protected.GET("/projects/:projectId/tasks", taskhandler.ListHandler(serverCtx))
+	protected.POST("/projects/:projectId/tasks", taskhandler.CreateHandler(serverCtx))
+	protected.PUT("/tasks/:taskId", taskhandler.UpdateHandler(serverCtx))
+	protected.PATCH("/tasks/:taskId/status", taskhandler.UpdateStatusHandler(serverCtx))
+	protected.DELETE("/tasks/:taskId", taskhandler.DeleteHandler(serverCtx))
+	protected.POST("/tasks/reorder", taskhandler.ReorderHandler(serverCtx))
+	protected.GET("/history/projects", projecthandler.HistoryListHandler(serverCtx))
+	protected.GET("/history/projects/:projectId", projecthandler.HistoryGetHandler(serverCtx))
+	protected.GET("/history/projects/:projectId/tasks", taskhandler.HistoryListHandler(serverCtx))
+	protected.GET("/history/parse-results", parseresulthandler.HistoryListHandler(serverCtx))
 }

@@ -2,7 +2,7 @@
 
 基于 `Gin + Gorm + PostgreSQL` 的 TaskPilot 后端服务仓库。
 
-当前阶段已经打通“文本文档 -> 异步 AI 解析 -> 结果编辑确认 -> 保存项目并生成初始任务”的后端链路，并可部署到单台云服务器上的 Docker Compose 环境；项目与任务管理接口尚未实现，因此完整 MVP 后端闭环仍未完成。
+当前阶段已经打通“文本文档 -> 异步 AI 解析 -> 结果编辑确认 -> 保存项目 -> 项目与任务管理 -> 历史查询”的后端链路，并可部署到单台云服务器上的 Docker Compose 环境。产品级 MVP 仍需完成前端主业务联调与 PDF 输入。
 
 ## 当前状态
 
@@ -16,6 +16,9 @@
 - SoruxGPT `/responses` 严格 JSON Schema 结构化解析
 - 解析结果查询、乐观锁编辑与幂等确认
 - 已确认解析结果幂等保存为项目，并在同一事务内生成初始任务
+- 项目查询、乐观锁编辑、归档/恢复/逻辑删除状态机
+- 任务查询、新增、乐观锁编辑、状态更新、物理删除和完整集合排序
+- 解析结果历史、全状态项目历史与历史任务只读查询
 - 统一响应信封
 - 本地数据库初始化脚本
 - 生产部署基础资产：
@@ -27,10 +30,9 @@
 
 待补充：
 
-- P0：项目 CRUD、任务 CRUD/状态/排序，以及相应权限与集成测试
 - P0：同步 OpenAPI 和前端 API，完成文本主链路端到端回归
 - P1：PDF 上传、文件存储和文字型 PDF 文本提取
-- P1/P2：历史记录、当前用户资料修改、登录限流；解析状态缓存按性能数据决定
+- P1/P2：当前用户资料修改、登录限流；解析状态缓存按性能数据决定
 
 项目创建采用一个解析结果只生成一个项目的幂等契约，并由 `uq_projects_parse_result_id` 唯一索引兜底。首次创建返回 `201`；重复或并发请求返回首次项目与任务，状态码为 `200`。
 
@@ -170,6 +172,22 @@ GET  /api/v1/parse-results/:resultId
 PUT  /api/v1/parse-results/:resultId
 POST /api/v1/parse-results/:resultId/confirm
 POST /api/v1/projects
+GET  /api/v1/projects
+GET  /api/v1/projects/:projectId
+PUT  /api/v1/projects/:projectId
+POST /api/v1/projects/:projectId/archive
+POST /api/v1/projects/:projectId/unarchive
+DELETE /api/v1/projects/:projectId
+GET  /api/v1/projects/:projectId/tasks
+POST /api/v1/projects/:projectId/tasks
+PUT  /api/v1/tasks/:taskId
+PATCH /api/v1/tasks/:taskId/status
+DELETE /api/v1/tasks/:taskId
+POST /api/v1/tasks/reorder
+GET  /api/v1/history/projects
+GET  /api/v1/history/projects/:projectId
+GET  /api/v1/history/projects/:projectId/tasks
+GET  /api/v1/history/parse-results
 ```
 
 文档、解析任务与解析结果接口兼容 Bearer Token，也支持 Access Cookie。使用 Cookie 鉴权的写请求必须携带 `X-CSRF-Token`。解析任务落库后会发布到 Redis Streams，由独立 Worker 推进 `pending -> processing -> success / failed`；发布失败由 Worker 的 PostgreSQL 对账循环补偿。
@@ -178,11 +196,12 @@ POST /api/v1/projects
 
 文本文档请求体上限为 `256 KiB`，正文最多 `50,000` 个 Unicode 字符。删除文档采用软删除，存在活跃解析任务时会返回冲突，已生成项目和任务不会被级联删除。
 
-生产和开发部署脚本当前会在更新应用容器前自动执行文档软删除/活跃解析任务唯一约束迁移。仅本地手动升级已有数据库时执行：
+生产和开发部署脚本当前会在更新应用容器前自动执行文档软删除/活跃解析任务唯一约束、项目来源结果唯一约束，以及项目/任务版本字段和查询索引迁移。仅本地手动升级已有数据库时执行：
 
 ```bash
 make migrate-documents-soft-delete-parse-jobs-unique
 make migrate-projects-parse-result-unique
+make migrate-projects-tasks-version
 ```
 
 邮箱规范化迁移 `scripts/migrate_users_email_normalized.sql` 当前未纳入部署脚本。新库的基础迁移已经包含 `LOWER(email)` 唯一索引；旧库升级时需要在发布前显式执行 `make migrate-users-email-normalized`（或在目标 Compose 中执行同一 SQL）。
