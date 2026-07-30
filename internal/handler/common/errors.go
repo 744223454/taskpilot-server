@@ -1,7 +1,9 @@
 package common
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +13,7 @@ import (
 	bizerrors "github.com/744223454/taskpilot-server/pkg/errors"
 	"github.com/744223454/taskpilot-server/pkg/response"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 func WriteError(c *gin.Context, logger *slog.Logger, err error) {
@@ -41,6 +44,21 @@ func WriteBindingError(c *gin.Context, err error) {
 		return
 	}
 	response.Error(c, http.StatusBadRequest, bizerrors.CodeBadRequest, err.Error())
+}
+
+func BindJSONStrict(c *gin.Context, value any) error {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain a single JSON object")
+		}
+		return err
+	}
+	return binding.Validator.ValidateStruct(value)
 }
 
 func PathID(c *gin.Context, name string) (int64, error) {

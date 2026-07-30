@@ -14,6 +14,7 @@ type Task struct {
 	Deadline            *time.Time `gorm:"column:deadline"`
 	SortOrder           int32      `gorm:"column:sort_order;not null;default:0"`
 	SourceType          string     `gorm:"column:source_type;type:varchar(20);not null"`
+	Version             int32      `gorm:"column:version;not null;default:1"`
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }

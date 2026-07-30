@@ -53,6 +53,47 @@ func (s *Service) Get(userID, resultID int64) (*types.ParseResultResponse, error
 	return parseResultResponse(result)
 }
 
+func (s *Service) HistoryList(userID int64, req *types.ParseResultHistoryListRequest) (*types.ParseResultHistoryListResponse, error) {
+	if err := s.requireDB(); err != nil {
+		return nil, err
+	}
+	if userID <= 0 || req == nil || req.Page < 0 || req.Page > 1000000 || req.PageSize < 0 || req.PageSize > 100 {
+		return nil, logicerrors.ErrInvalidInput
+	}
+	page := req.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = 10
+	}
+	total, err := gorm.G[parseresultmodel.ParseResult](s.svcCtx.DB).
+		Where("user_id = ?", userID).
+		Count(s.ctx, "id")
+	if err != nil {
+		return nil, fmt.Errorf("count parse result history: %w", err)
+	}
+	results, err := gorm.G[parseresultmodel.ParseResult](s.svcCtx.DB).
+		Where("user_id = ?", userID).
+		Order("updated_at DESC, id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(s.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list parse result history: %w", err)
+	}
+	items := make([]types.ParseResultResponse, len(results))
+	for index, result := range results {
+		response, responseErr := parseResultResponse(result)
+		if responseErr != nil {
+			return nil, fmt.Errorf("build parse result history response: %w", responseErr)
+		}
+		items[index] = *response
+	}
+	return &types.ParseResultHistoryListResponse{Items: items, Page: page, PageSize: pageSize, Total: total}, nil
+}
+
 func (s *Service) Update(userID, resultID int64, req *types.UpdateParseResultRequest) (*types.ParseResultResponse, error) {
 	if err := s.requireDB(); err != nil {
 		return nil, err

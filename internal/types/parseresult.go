@@ -9,6 +9,11 @@ type GeneratedTask struct {
 	Deadline    *time.Time `json:"deadline"`
 }
 
+type ParseResultHistoryListRequest struct {
+	Page     int `form:"page" binding:"omitempty,min=1,max=1000000"`
+	PageSize int `form:"page_size" binding:"omitempty,min=1,max=100"`
+}
+
 type UpdateParseResultRequest struct {
 	Version         int32           `json:"version" binding:"required,min=1"`
 	Title           string          `json:"title" binding:"required,max=255"`
@@ -36,4 +41,11 @@ type ParseResultResponse struct {
 	IsConfirmed     bool            `json:"is_confirmed"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type ParseResultHistoryListResponse struct {
+	Items    []ParseResultResponse `json:"items"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
+	Total    int64                 `json:"total"`
 }
