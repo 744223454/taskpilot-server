@@ -114,6 +114,7 @@ CREATE TABLE projects (
     description TEXT,
     deadline TIMESTAMPTZ,
     status VARCHAR(20) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_projects_user
@@ -123,12 +124,16 @@ CREATE TABLE projects (
     CONSTRAINT fk_projects_parse_result
         FOREIGN KEY (parse_result_id) REFERENCES parse_results(id) ON DELETE RESTRICT,
     CONSTRAINT chk_projects_status
-        CHECK (status IN ('active', 'archived', 'deleted'))
+        CHECK (status IN ('active', 'archived', 'deleted')),
+    CONSTRAINT chk_projects_version
+        CHECK (version >= 1)
 );
 
 CREATE INDEX idx_projects_user_id ON projects(user_id);
 CREATE INDEX idx_projects_source_document_id ON projects(source_document_id);
 CREATE UNIQUE INDEX uq_projects_parse_result_id ON projects(parse_result_id);
+CREATE INDEX idx_projects_user_status_updated_at
+    ON projects(user_id, status, updated_at DESC, id DESC);
 
 CREATE TABLE tasks (
     id BIGSERIAL PRIMARY KEY,
@@ -142,6 +147,7 @@ CREATE TABLE tasks (
     deadline TIMESTAMPTZ,
     sort_order INT NOT NULL DEFAULT 0,
     source_type VARCHAR(20) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_tasks_project
@@ -157,9 +163,12 @@ CREATE TABLE tasks (
     CONSTRAINT chk_tasks_source_type
         CHECK (source_type IN ('ai', 'manual')),
     CONSTRAINT chk_tasks_sort_order
-        CHECK (sort_order >= 0)
+        CHECK (sort_order >= 0),
+    CONSTRAINT chk_tasks_version
+        CHECK (version >= 1)
 );
 
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX idx_tasks_source_parse_result_id ON tasks(source_parse_result_id);
+CREATE INDEX idx_tasks_project_sort_order ON tasks(project_id, sort_order, id);

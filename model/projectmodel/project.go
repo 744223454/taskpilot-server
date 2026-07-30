@@ -11,6 +11,7 @@ type Project struct {
 	Description      *string    `gorm:"type:text"`
 	Deadline         *time.Time `gorm:"column:deadline"`
 	Status           string     `gorm:"type:varchar(20);not null"`
+	Version          int32      `gorm:"column:version;not null;default:1"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

@@ -101,3 +101,24 @@ func ConfirmHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 		response.Success(c, http.StatusOK, result)
 	}
 }
+
+func HistoryListHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req types.ParseResultHistoryListRequest
+		if err := c.ShouldBindQuery(&req); err != nil {
+			common.WriteBindingError(c, err)
+			return
+		}
+		principal, ok := middleware.PrincipalFrom(c)
+		if !ok {
+			response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, "invalid access token context")
+			return
+		}
+		results, err := parseresultlogic.NewService(c.Request.Context(), svcCtx).HistoryList(principal.UserID, &req)
+		if err != nil {
+			common.WriteError(c, svcCtx.Logger, err)
+			return
+		}
+		response.Success(c, http.StatusOK, results)
+	}
+}

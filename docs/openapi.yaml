@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -10,7 +10,7 @@ info:
     - 当前已实现接口统一返回响应信封 `{ code, message, data }`，错误响应的 `data` 为 `null`
     - 受保护接口支持 Bearer Token 或 `access_token` Cookie；Cookie 鉴权的写请求还必须携带与 `csrf_token` Cookie 相同的 `X-CSRF-Token`
     - `/auth/refresh` 与 `/auth/logout` 强制使用 `refresh_token` Cookie 和 CSRF Header
-    - 未实现的项目管理、任务管理和历史接口暂未写入本规范
+    - 项目、任务管理和历史只读接口已经接入；PDF 上传与用户资料修改仍未实现
     - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大, 10010=服务不可用, 10011=禁止访问
 servers:
   - url: http://localhost:8888
@@ -27,7 +27,11 @@ tags:
   - name: ParseResults
     description: AI 解析结果查询、编辑与确认
   - name: Projects
-    description: 将已确认解析结果保存为项目
+    description: 项目创建、查询、编辑和状态管理
+  - name: Tasks
+    description: 项目任务查询、编辑、状态、删除与排序
+  - name: History
+    description: 项目与解析结果历史只读查询
 paths:
   /healthz:
     get:
@@ -1388,6 +1392,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: 分页查询当前项目
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, archived]
+            default: active
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
     post:
       tags: [Projects]
       summary: 将解析结果保存为项目
@@ -1441,6 +1480,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 该解析结果已关联一个已删除项目，不能再次创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "422":
           description: 解析结果未确认，或任务快照无法生成合法任务
           content:
@@ -1459,6 +1504,432 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}:
+    get:
+      tags: [Projects]
+      summary: 查询项目详情
+      operationId: getProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    put:
+      tags: [Projects]
+      summary: 编辑活动项目
+      description: 仅 active 项目可编辑，使用 version 乐观锁；不会回写解析结果。
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+      responses:
+        "200":
+          description: 编辑成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 项目已归档或 version 冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [Projects]
+      summary: 删除已归档项目
+      description: 仅 archived 项目可逻辑删除。项目及任务继续保留并可通过历史接口查看。
+      operationId: deleteProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: active 项目不能直接删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}/archive:
+    post:
+      tags: [Projects]
+      summary: 归档项目
+      description: active 项目转为 archived；重复归档幂等返回当前项目。
+      operationId: archiveProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 归档成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}/unarchive:
+    post:
+      tags: [Projects]
+      summary: 取消归档
+      description: archived 项目恢复为 active；重复取消归档幂等返回当前项目。
+      operationId: unarchiveProject
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 恢复成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}/tasks:
+    get:
+      tags: [Tasks]
+      summary: 查询项目任务
+      description: active 和 archived 项目均可读取；任务不分页，按 sort_order、id 升序返回。
+      operationId: listProjectTasks
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [todo, doing, done]
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    post:
+      tags: [Tasks]
+      summary: 新增手动任务
+      description: 仅 active 项目允许。新任务固定为 todo、manual，并追加到当前顺序末尾。
+      operationId: createTask
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 项目已归档
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/tasks/{taskId}:
+    put:
+      tags: [Tasks]
+      summary: 编辑任务
+      description: 仅 active 项目内任务可编辑，使用 version 乐观锁；来源字段、状态和排序不可修改。
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+      responses:
+        "200":
+          description: 编辑成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskEnvelope"
+        "404":
+          description: 任务或所属项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 项目已归档或 version 冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [Tasks]
+      summary: 物理删除任务
+      operationId: deleteTask
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyEnvelope"
+        "404":
+          description: 任务不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 所属项目已归档
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/tasks/{taskId}/status:
+    patch:
+      tags: [Tasks]
+      summary: 更新任务状态
+      description: todo、doing、done 可任意切换；重复设置同一状态幂等返回当前任务。
+      operationId: updateTaskStatus
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskStatusRequest"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskEnvelope"
+        "404":
+          description: 任务不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 所属项目已归档
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/tasks/reorder:
+    post:
+      tags: [Tasks]
+      summary: 重新排列项目全部任务
+      description: 必须提交项目当前完整任务 ID 集合；事务内锁定项目并重新写入连续 sort_order。
+      operationId: reorderTasks
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderTasksRequest"
+      responses:
+        "200":
+          description: 排序成功，返回完整任务列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListEnvelope"
+        "404":
+          description: 项目不存在、已删除或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 项目已归档或任务集合与数据库不一致
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/history/projects:
+    get:
+      tags: [History]
+      summary: 查询项目历史
+      description: 包含 active、archived、deleted；不传 status 时返回全部状态。
+      operationId: listProjectHistory
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, deleted]
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListEnvelope"
+  /api/v1/history/projects/{projectId}:
+    get:
+      tags: [History]
+      summary: 查询历史项目详情
+      operationId: getProjectHistory
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "404":
+          description: 项目不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/history/projects/{projectId}/tasks:
+    get:
+      tags: [History]
+      summary: 查询历史项目任务
+      operationId: listProjectTaskHistory
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [todo, doing, done]
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListEnvelope"
+        "404":
+          description: 项目不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/history/parse-results:
+    get:
+      tags: [History]
+      summary: 查询解析结果历史
+      operationId: listParseResultHistory
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResultListEnvelope"
 components:
   parameters:
     CSRFToken:
@@ -1477,6 +1948,39 @@ components:
         type: integer
         format: int64
         minimum: 1
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      description: 项目 ID
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: 任务 ID
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
   securitySchemes:
     bearerAuth:
       type: http
@@ -1920,9 +2424,29 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+    UpdateProjectRequest:
+      type: object
+      required: [version, name]
+      properties:
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 5000
+          nullable: true
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
     Project:
       type: object
-      required: [id, source_document_id, parse_result_id, name, description, deadline, status, created_at, updated_at]
+      required: [id, source_document_id, parse_result_id, name, description, deadline, status, version, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -1945,6 +2469,10 @@ components:
         status:
           type: string
           enum: [active, archived, deleted]
+        version:
+          type: integer
+          format: int32
+          minimum: 1
         created_at:
           type: string
           format: date-time
@@ -1953,7 +2481,7 @@ components:
           format: date-time
     Task:
       type: object
-      required: [id, project_id, source_parse_result_id, title, description, status, priority, deadline, sort_order, source_type, created_at, updated_at]
+      required: [id, project_id, source_parse_result_id, title, description, status, priority, deadline, sort_order, source_type, version, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -1987,12 +2515,105 @@ components:
         source_type:
           type: string
           enum: [ai, manual]
+        version:
+          type: integer
+          format: int32
+          minimum: 1
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    CreateTaskRequest:
+      type: object
+      required: [title, priority]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        priority:
+          type: string
+          enum: [low, medium, high]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+    UpdateTaskRequest:
+      allOf:
+        - $ref: "#/components/schemas/CreateTaskRequest"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              format: int32
+              minimum: 1
+    UpdateTaskStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [todo, doing, done]
+    ReorderTasksRequest:
+      type: object
+      required: [project_id, task_ids]
+      properties:
+        project_id:
+          type: integer
+          format: int64
+          minimum: 1
+        task_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+    ProjectList:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    TaskList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+    ParseResultList:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParseResult"
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+          format: int64
     CreateProjectPayload:
       type: object
       required: [project, tasks]
@@ -2035,6 +2656,46 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ParseResult"
+    ParseResultListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/ParseResultList"
+    ProjectEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/Project"
+    ProjectListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/ProjectList"
+    TaskEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/Task"
+    TaskListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskList"
     CreateProjectEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"

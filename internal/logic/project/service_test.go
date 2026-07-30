@@ -61,3 +61,20 @@ func TestNormalizeRequest(t *testing.T) {
 		t.Fatalf("normalizeRequest() error = %v, want invalid input", err)
 	}
 }
+
+func TestValidPagination(t *testing.T) {
+	for _, testCase := range []struct {
+		page     int
+		pageSize int
+		valid    bool
+	}{
+		{page: 0, pageSize: 0, valid: true},
+		{page: 1, pageSize: 100, valid: true},
+		{page: -1, pageSize: 10, valid: false},
+		{page: 1, pageSize: 101, valid: false},
+	} {
+		if got := validPagination(testCase.page, testCase.pageSize); got != testCase.valid {
+			t.Fatalf("validPagination(%d, %d) = %v, want %v", testCase.page, testCase.pageSize, got, testCase.valid)
+		}
+	}
+}
