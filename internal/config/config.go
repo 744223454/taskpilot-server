@@ -48,6 +48,20 @@ type Config struct {
 		MaxOutputTokens int64  `yaml:"MaxOutputTokens"`
 	} `yaml:"AI"`
 
+	Upload struct {
+		Root                     string `yaml:"Root"`
+		MaxFileBytes             int64  `yaml:"MaxFileBytes"`
+		MaxPages                 int    `yaml:"MaxPages"`
+		MaxTextChars             int    `yaml:"MaxTextChars"`
+		MinEffectiveChars        int    `yaml:"MinEffectiveChars"`
+		ExtractTimeout           int64  `yaml:"ExtractTimeout"`
+		MaxConcurrentExtractions int    `yaml:"MaxConcurrentExtractions"`
+		SlotWaitTimeout          int64  `yaml:"SlotWaitTimeout"`
+		TempGrace                int64  `yaml:"TempGrace"`
+		OrphanGrace              int64  `yaml:"OrphanGrace"`
+		CleanupInterval          int64  `yaml:"CleanupInterval"`
+	} `yaml:"Upload"`
+
 	Worker struct {
 		StreamKey         string `yaml:"StreamKey"`
 		ConsumerGroup     string `yaml:"ConsumerGroup"`
@@ -124,6 +138,9 @@ func Load(path string) (Config, error) {
 	if cfg.AI.MaxOutputTokens < 0 {
 		return cfg, fmt.Errorf("config AI.MaxOutputTokens must not be negative")
 	}
+	if err := applyUploadDefaults(&cfg); err != nil {
+		return cfg, err
+	}
 	if cfg.Worker.StreamKey == "" {
 		cfg.Worker.StreamKey = "taskpilot:queue:parse_jobs"
 	}
@@ -141,6 +158,51 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func applyUploadDefaults(cfg *Config) error {
+	if cfg.Upload.Root == "" {
+		cfg.Upload.Root = "uploads"
+	}
+	positiveSettings := []struct {
+		name         string
+		value        *int64
+		defaultValue int64
+	}{
+		{"MaxFileBytes", &cfg.Upload.MaxFileBytes, 10 << 20},
+		{"ExtractTimeout", &cfg.Upload.ExtractTimeout, 15},
+		{"SlotWaitTimeout", &cfg.Upload.SlotWaitTimeout, 3},
+		{"TempGrace", &cfg.Upload.TempGrace, 60 * 60},
+		{"OrphanGrace", &cfg.Upload.OrphanGrace, 24 * 60 * 60},
+		{"CleanupInterval", &cfg.Upload.CleanupInterval, 24 * 60 * 60},
+	}
+	for _, setting := range positiveSettings {
+		if *setting.value < 0 {
+			return fmt.Errorf("config Upload.%s must not be negative", setting.name)
+		}
+		if *setting.value == 0 {
+			*setting.value = setting.defaultValue
+		}
+	}
+	if cfg.Upload.MaxPages == 0 {
+		cfg.Upload.MaxPages = 50
+	}
+	if cfg.Upload.MaxTextChars == 0 {
+		cfg.Upload.MaxTextChars = 50000
+	}
+	if cfg.Upload.MinEffectiveChars == 0 {
+		cfg.Upload.MinEffectiveChars = 20
+	}
+	if cfg.Upload.MaxPages < 1 || cfg.Upload.MaxTextChars < 1 || cfg.Upload.MinEffectiveChars < 1 {
+		return fmt.Errorf("config Upload document limits must be positive")
+	}
+	if cfg.Upload.MaxConcurrentExtractions == 0 {
+		cfg.Upload.MaxConcurrentExtractions = 2
+	}
+	if cfg.Upload.MaxConcurrentExtractions < 1 || cfg.Upload.MaxConcurrentExtractions > 4 {
+		return fmt.Errorf("config Upload.MaxConcurrentExtractions must be between 1 and 4")
+	}
+	return nil
 }
 
 func applyWorkerDefaults(cfg *Config) error {
@@ -214,6 +276,18 @@ func applyEnvOverrides(cfg *Config) {
 	cfg.AI.Model = envString("TASKPILOT_AI_MODEL", cfg.AI.Model)
 	cfg.AI.RequestTimeout = envInt64("TASKPILOT_AI_REQUEST_TIMEOUT", cfg.AI.RequestTimeout)
 	cfg.AI.MaxOutputTokens = envInt64("TASKPILOT_AI_MAX_OUTPUT_TOKENS", cfg.AI.MaxOutputTokens)
+
+	cfg.Upload.Root = envString("TASKPILOT_UPLOAD_ROOT", cfg.Upload.Root)
+	cfg.Upload.MaxFileBytes = envInt64("TASKPILOT_UPLOAD_MAX_FILE_BYTES", cfg.Upload.MaxFileBytes)
+	cfg.Upload.MaxPages = envInt("TASKPILOT_UPLOAD_MAX_PAGES", cfg.Upload.MaxPages)
+	cfg.Upload.MaxTextChars = envInt("TASKPILOT_UPLOAD_MAX_TEXT_CHARS", cfg.Upload.MaxTextChars)
+	cfg.Upload.MinEffectiveChars = envInt("TASKPILOT_UPLOAD_MIN_EFFECTIVE_CHARS", cfg.Upload.MinEffectiveChars)
+	cfg.Upload.ExtractTimeout = envInt64("TASKPILOT_UPLOAD_EXTRACT_TIMEOUT", cfg.Upload.ExtractTimeout)
+	cfg.Upload.MaxConcurrentExtractions = envInt("TASKPILOT_UPLOAD_MAX_CONCURRENT_EXTRACTIONS", cfg.Upload.MaxConcurrentExtractions)
+	cfg.Upload.SlotWaitTimeout = envInt64("TASKPILOT_UPLOAD_SLOT_WAIT_TIMEOUT", cfg.Upload.SlotWaitTimeout)
+	cfg.Upload.TempGrace = envInt64("TASKPILOT_UPLOAD_TEMP_GRACE", cfg.Upload.TempGrace)
+	cfg.Upload.OrphanGrace = envInt64("TASKPILOT_UPLOAD_ORPHAN_GRACE", cfg.Upload.OrphanGrace)
+	cfg.Upload.CleanupInterval = envInt64("TASKPILOT_UPLOAD_CLEANUP_INTERVAL", cfg.Upload.CleanupInterval)
 
 	cfg.Worker.StreamKey = envString("TASKPILOT_WORKER_STREAM_KEY", cfg.Worker.StreamKey)
 	cfg.Worker.ConsumerGroup = envString("TASKPILOT_WORKER_CONSUMER_GROUP", cfg.Worker.ConsumerGroup)

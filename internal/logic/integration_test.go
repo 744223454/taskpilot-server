@@ -30,10 +30,53 @@ import (
 	"github.com/744223454/taskpilot-server/pkg/ai"
 	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
 	"github.com/744223454/taskpilot-server/pkg/database"
+	"github.com/744223454/taskpilot-server/pkg/upload"
 	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+func TestIntegrationPDFDocumentLifecycle(t *testing.T) {
+	db := newIntegrationDB(t)
+	ctx := context.Background()
+	fileStore, err := upload.NewLocalFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalFileStore() error = %v", err)
+	}
+	serviceContext := &svc.ServiceContext{
+		DB:           db,
+		Files:        fileStore,
+		PDFExtractor: fakePDFExtractor{result: upload.PDFResult{Text: "Extracted TaskPilot PDF document body.", PageCount: 3}},
+	}
+	serviceContext.Config.Upload.MaxFileBytes = 10 << 20
+	user := createIntegrationUser(t, db, "pdf-document@example.com")
+
+	document, err := documentlogic.NewService(ctx, serviceContext).CreatePDF(user.ID, &types.CreatePDFDocumentRequest{
+		FileName: "project-brief.PDF",
+	}, strings.NewReader("%PDF-1.4 fixture body"))
+	if err != nil {
+		t.Fatalf("CreatePDF() error = %v", err)
+	}
+	if document.SourceType != "pdf" || document.Title == nil || *document.Title != "project-brief" || document.FileURL == nil || document.PageCount == nil || *document.PageCount != 3 || document.FileSize == nil || *document.FileSize != 21 || document.Content == nil {
+		t.Fatalf("CreatePDF() document = %#v", document)
+	}
+	stored, err := gorm.G[documentmodel.Document](db).Where("id = ?", document.ID).First(ctx)
+	if err != nil || stored.RawText == nil || *stored.RawText != "Extracted TaskPilot PDF document body." || stored.TextInput != nil || stored.Status != "ready" {
+		t.Fatalf("stored PDF document = %#v, error = %v", stored, err)
+	}
+	files, err := fileStore.List(ctx, "documents")
+	if err != nil || len(files) != 1 || files[0].Key != *document.FileURL {
+		t.Fatalf("stored PDF files = %#v, error = %v", files, err)
+	}
+
+	if err := documentlogic.NewService(ctx, serviceContext).Delete(user.ID, document.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	files, err = fileStore.List(ctx, "documents")
+	if err != nil || len(files) != 0 {
+		t.Fatalf("PDF files after delete = %#v, error = %v", files, err)
+	}
+}
 
 func TestIntegrationConcurrentParseJobCreationAllowsOneActiveJob(t *testing.T) {
 	db := newIntegrationDB(t)
@@ -440,6 +483,14 @@ func TestIntegrationConcurrentProjectCreationReturnsOneProject(t *testing.T) {
 type fakeParser struct {
 	result ai.ParsedDocument
 	err    error
+}
+
+type fakePDFExtractor struct {
+	result upload.PDFResult
+}
+
+func (p fakePDFExtractor) Extract(context.Context, string) (upload.PDFResult, error) {
+	return p.result, nil
 }
 
 func (p fakeParser) Parse(context.Context, string) (ai.ParsedDocument, error) {

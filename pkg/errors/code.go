@@ -13,4 +13,6 @@ const (
 	CodePayloadTooLarge     = 10009
 	CodeServiceUnavailable  = 10010
 	CodeForbidden           = 10011
+	CodeUnsupportedFileType = 10012
+	CodePDFUnprocessable    = 10013
 )

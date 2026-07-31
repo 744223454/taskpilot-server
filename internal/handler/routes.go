@@ -38,6 +38,7 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.Use(middleware.RequireCSRFForCookieAuth())
 	protected.GET("/users/me", authhandler.MeHandler(serverCtx))
 	protected.POST("/documents/text", middleware.LimitRequestBody(documenthandler.MaxTextDocumentBodyBytes), documenthandler.CreateTextHandler(serverCtx))
+	protected.POST("/documents/pdf", middleware.LimitRequestBody(documenthandler.MaxPDFRequestBodyBytes(serverCtx)), documenthandler.CreatePDFHandler(serverCtx))
 	protected.GET("/documents", documenthandler.ListHandler(serverCtx))
 	protected.GET("/documents/:documentId", documenthandler.GetHandler(serverCtx))
 	protected.DELETE("/documents/:documentId", documenthandler.DeleteHandler(serverCtx))

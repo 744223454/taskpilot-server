@@ -19,6 +19,7 @@ import (
 	"github.com/744223454/taskpilot-server/model/parseresultmodel"
 	"github.com/744223454/taskpilot-server/pkg/ai"
 	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
+	"github.com/744223454/taskpilot-server/pkg/upload"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -41,6 +42,10 @@ type Worker struct {
 	heartbeatInterval time.Duration
 	heartbeatTTL      time.Duration
 	shutdownGrace     time.Duration
+	files             upload.FileStore
+	cleanupInterval   time.Duration
+	tempGrace         time.Duration
+	orphanGrace       time.Duration
 	processSlots      chan struct{}
 }
 
@@ -59,6 +64,18 @@ func New(svcCtx *svc.ServiceContext) (*Worker, error) {
 		logger = slog.Default()
 	}
 	config := svcCtx.Config.Worker
+	cleanupInterval := time.Duration(svcCtx.Config.Upload.CleanupInterval) * time.Second
+	if cleanupInterval <= 0 {
+		cleanupInterval = 24 * time.Hour
+	}
+	tempGrace := time.Duration(svcCtx.Config.Upload.TempGrace) * time.Second
+	if tempGrace <= 0 {
+		tempGrace = time.Hour
+	}
+	orphanGrace := time.Duration(svcCtx.Config.Upload.OrphanGrace) * time.Second
+	if orphanGrace <= 0 {
+		orphanGrace = 24 * time.Hour
+	}
 	return &Worker{
 		db:                svcCtx.DB,
 		queue:             svcCtx.ParseJobs,
@@ -75,6 +92,10 @@ func New(svcCtx *svc.ServiceContext) (*Worker, error) {
 		heartbeatInterval: time.Duration(config.HeartbeatInterval) * time.Second,
 		heartbeatTTL:      time.Duration(config.HeartbeatTTL) * time.Second,
 		shutdownGrace:     time.Duration(config.ShutdownGrace) * time.Second,
+		files:             svcCtx.Files,
+		cleanupInterval:   cleanupInterval,
+		tempGrace:         tempGrace,
+		orphanGrace:       orphanGrace,
 		processSlots:      make(chan struct{}, config.Concurrency),
 	}, nil
 }
@@ -100,6 +121,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.reconcileLoop,
 		w.heartbeatLoop,
 		w.trimLoop,
+		w.uploadCleanupLoop,
 	} {
 		waitGroup.Add(1)
 		go func(run func(context.Context, context.Context)) {
@@ -128,6 +150,46 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.logger.Warn("parse worker graceful shutdown timed out", "consumer", w.consumer)
 		return nil
 	}
+}
+
+func (w *Worker) uploadCleanupLoop(runContext, _ context.Context) {
+	if w.files == nil {
+		return
+	}
+	w.cleanupUploads(runContext)
+	ticker := time.NewTicker(w.cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-runContext.Done():
+			return
+		case <-ticker.C:
+			w.cleanupUploads(runContext)
+		}
+	}
+}
+
+func (w *Worker) cleanupUploads(ctx context.Context) {
+	documents, err := gorm.G[documentmodel.Document](w.db).
+		Select("file_url").
+		Where("source_type = ? AND file_url IS NOT NULL", "pdf").
+		Find(ctx)
+	if err != nil {
+		w.logger.ErrorContext(ctx, "load referenced PDF files for cleanup failed; no files deleted", "error", err)
+		return
+	}
+	referenced := make(map[string]struct{}, len(documents))
+	for _, document := range documents {
+		if document.FileURL != nil && *document.FileURL != "" {
+			referenced[*document.FileURL] = struct{}{}
+		}
+	}
+
+	stats, err := upload.Cleanup(ctx, w.files, referenced, time.Now(), w.tempGrace, w.orphanGrace)
+	if err != nil {
+		w.logger.ErrorContext(ctx, "PDF file cleanup completed with errors", "error", err)
+	}
+	w.logger.InfoContext(ctx, "PDF file cleanup completed", "scanned", stats.Scanned, "deleted", stats.Deleted, "skipped", stats.Skipped, "failed", stats.Failed)
 }
 
 func (w *Worker) ProcessJob(ctx context.Context, jobID int64) error {
