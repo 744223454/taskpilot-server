@@ -13,6 +13,7 @@ import (
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
 	"github.com/744223454/taskpilot-server/pkg/database"
+	"github.com/744223454/taskpilot-server/pkg/upload"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -25,6 +26,8 @@ type ServiceContext struct {
 	RefreshSessions jwtauth.RefreshSessionStore
 	ParseJobs       cachepkg.ParseJobQueue
 	Parser          ai.Parser
+	Files           upload.FileStore
+	PDFExtractor    upload.PDFExtractor
 	Logger          *slog.Logger
 }
 
@@ -42,6 +45,24 @@ func NewServiceContext(c config.Config) *ServiceContext {
 		JWT:    jwtauth.NewManager(c.Auth.AccessSecret, c.Auth.AccessExpire),
 		Logger: logger,
 	}
+	uploadRoot := c.Upload.Root
+	if uploadRoot == "" {
+		uploadRoot = "uploads"
+	}
+	fileStore, err := upload.NewLocalFileStore(uploadRoot)
+	if err != nil {
+		logger.Error("upload storage initialization failed", "error", err)
+	} else {
+		serverContext.Files = fileStore
+	}
+	serverContext.PDFExtractor = upload.NewPopplerExtractor(
+		c.Upload.MaxPages,
+		c.Upload.MaxTextChars,
+		c.Upload.MinEffectiveChars,
+		c.Upload.MaxConcurrentExtractions,
+		time.Duration(c.Upload.ExtractTimeout)*time.Second,
+		time.Duration(c.Upload.SlotWaitTimeout)*time.Second,
+	)
 	if c.Cache.Host == "" {
 		logger.Warn("redis initialization skipped", "error", "config Cache.Host is empty")
 		return serverContext

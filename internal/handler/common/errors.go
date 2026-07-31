@@ -26,6 +26,14 @@ func WriteError(c *gin.Context, logger *slog.Logger, err error) {
 		response.Error(c, http.StatusConflict, bizerrors.CodeConflict, err.Error())
 	case errors.Is(err, logicerrors.ErrInvalidState):
 		response.Error(c, http.StatusUnprocessableEntity, bizerrors.CodeInvalidState, err.Error())
+	case errors.Is(err, logicerrors.ErrPayloadTooLarge):
+		response.Error(c, http.StatusRequestEntityTooLarge, bizerrors.CodePayloadTooLarge, err.Error())
+	case errors.Is(err, logicerrors.ErrUnsupportedFileType):
+		response.Error(c, http.StatusUnsupportedMediaType, bizerrors.CodeUnsupportedFileType, err.Error())
+	case errors.Is(err, logicerrors.ErrPDFUnprocessable):
+		response.Error(c, http.StatusUnprocessableEntity, bizerrors.CodePDFUnprocessable, err.Error())
+	case errors.Is(err, logicerrors.ErrExtractionBusy):
+		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeServiceUnavailable, err.Error())
 	case errors.Is(err, logicerrors.ErrDatabaseUnavailable):
 		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeDatabaseUnavailable, err.Error())
 	case errors.Is(err, logicerrors.ErrCacheUnavailable):
