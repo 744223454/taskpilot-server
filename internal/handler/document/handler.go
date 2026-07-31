@@ -15,6 +15,8 @@ import (
 
 const MaxTextDocumentBodyBytes int64 = 256 << 10
 
+const multipartOverheadAllowance int64 = 1 << 20
+
 func CreateTextHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req types.CreateTextDocumentRequest
@@ -37,6 +39,46 @@ func CreateTextHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 
 		response.Success(c, http.StatusCreated, document)
 	}
+}
+
+func CreatePDFHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		fileHeader, err := c.FormFile("file")
+		if err != nil {
+			common.WriteBindingError(c, err)
+			return
+		}
+		file, err := fileHeader.Open()
+		if err != nil {
+			common.WriteBindingError(c, err)
+			return
+		}
+		defer file.Close()
+
+		principal, ok := middleware.PrincipalFrom(c)
+		if !ok {
+			response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, "invalid access token context")
+			return
+		}
+		req := types.CreatePDFDocumentRequest{
+			Title:    c.PostForm("title"),
+			FileName: fileHeader.Filename,
+		}
+		document, err := documentlogic.NewService(c.Request.Context(), svcCtx).CreatePDF(principal.UserID, &req, file)
+		if err != nil {
+			common.WriteError(c, svcCtx.Logger, err)
+			return
+		}
+		response.Success(c, http.StatusCreated, document)
+	}
+}
+
+func MaxPDFRequestBodyBytes(svcCtx *svc.ServiceContext) int64 {
+	maxFileBytes := svcCtx.Config.Upload.MaxFileBytes
+	if maxFileBytes == 0 {
+		maxFileBytes = 10 << 20
+	}
+	return maxFileBytes + multipartOverheadAllowance
 }
 
 func GetHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {

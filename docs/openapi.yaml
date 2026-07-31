@@ -11,7 +11,7 @@ info:
     - 受保护接口支持 Bearer Token 或 `access_token` Cookie；Cookie 鉴权的写请求还必须携带与 `csrf_token` Cookie 相同的 `X-CSRF-Token`
     - `/auth/refresh` 与 `/auth/logout` 强制使用 `refresh_token` Cookie 和 CSRF Header
     - 项目、任务管理和历史只读接口已经接入；PDF 上传与用户资料修改仍未实现
-    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体过大, 10010=服务不可用, 10011=禁止访问
+    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体或文件过大, 10010=服务不可用, 10011=禁止访问, 10012=文件类型不支持, 10013=PDF 无法处理
 servers:
   - url: http://localhost:8888
     description: Local development server
@@ -518,6 +518,97 @@ paths:
                     code: 10005
                     message: internal server error
                     data: null
+  /api/v1/documents/pdf:
+    post:
+      tags: [Documents]
+      summary: 上传文字型 PDF 文档
+      description: |
+        同步保存 PDF、使用 Poppler 校验并提取文字，成功后直接创建 `ready` 文档。
+
+        限制与行为：
+        - `file` 必填，文件内容最大 10 MiB；`title` 可选，默认取原始文件名去掉 `.pdf` 扩展名
+        - 仅支持未加密且包含可提取文字的 PDF，不提供 OCR
+        - 最大 50 页、正文最大 50,000 Unicode 字符，有效正文至少 20 字符
+        - 提取最长 15 秒；全局最多 2 个提取进程，等待槽位最长 3 秒
+        - 成功后由客户端另行调用 `POST /api/v1/parse-jobs`，上传接口不会自动创建 AI 解析任务
+        - `file_url` 是内部存储键，不是可下载 URL
+      operationId: createPDFDocument
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CreatePDFDocumentRequest"
+      responses:
+        "201":
+          description: PDF 已保存并完成文字提取
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEnvelope"
+        "400":
+          description: multipart、文件或标题参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "413":
+          description: PDF 文件超过 10 MiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                payloadTooLarge:
+                  value:
+                    code: 10009
+                    message: uploaded file too large
+                    data: null
+        "415":
+          description: 上传内容不是 PDF
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unsupported:
+                  value:
+                    code: 10012
+                    message: unsupported file type
+                    data: null
+        "422":
+          description: PDF 损坏、加密、无有效文字、超页数、超正文或提取超时
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                unprocessable:
+                  value:
+                    code: 10013
+                    message: PDF cannot be processed
+                    data: null
+        "503":
+          description: 数据库不可用或提取槽位繁忙
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 文件存储、Poppler 或服务端内部错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/documents:
     get:
       tags: [Documents]
@@ -2183,6 +2274,17 @@ components:
           type: string
           maxLength: 50000
           example: 请于7月30日前提交项目说明书和演示视频
+    CreatePDFDocumentRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        title:
+          type: string
+          maxLength: 255
+          description: 可选；缺省时使用文件名去掉 `.pdf` 扩展名
     DocumentSummary:
       type: object
       required: [id, source_type, status, created_at, updated_at]

@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	logicerrors "github.com/744223454/taskpilot-server/internal/logic"
+	bizerrors "github.com/744223454/taskpilot-server/pkg/errors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,5 +60,35 @@ func TestWriteErrorLogsInternalErrorWithoutExposingIt(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "database connection reset") {
 		t.Fatal("internal error was not written to logs")
+	}
+}
+
+func TestWriteErrorMapsPDFErrors(t *testing.T) {
+	for _, testCase := range []struct {
+		err        error
+		statusCode int
+		code       int
+	}{
+		{err: logicerrors.ErrUnsupportedFileType, statusCode: http.StatusUnsupportedMediaType, code: bizerrors.CodeUnsupportedFileType},
+		{err: logicerrors.ErrPDFUnprocessable, statusCode: http.StatusUnprocessableEntity, code: bizerrors.CodePDFUnprocessable},
+		{err: logicerrors.ErrExtractionBusy, statusCode: http.StatusServiceUnavailable, code: bizerrors.CodeServiceUnavailable},
+		{err: logicerrors.ErrPayloadTooLarge, statusCode: http.StatusRequestEntityTooLarge, code: bizerrors.CodePayloadTooLarge},
+	} {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/documents/pdf", nil)
+		WriteError(context, slog.Default(), testCase.err)
+		if recorder.Code != testCase.statusCode {
+			t.Fatalf("WriteError(%v) status = %d, want %d", testCase.err, recorder.Code, testCase.statusCode)
+		}
+		var envelope struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if envelope.Code != testCase.code {
+			t.Fatalf("WriteError(%v) code = %d, want %d", testCase.err, envelope.Code, testCase.code)
+		}
 	}
 }

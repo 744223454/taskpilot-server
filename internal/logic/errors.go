@@ -9,4 +9,8 @@ var (
 	ErrNotFound            = errors.New("resource not found")
 	ErrConflict            = errors.New("resource conflict")
 	ErrInvalidState        = errors.New("invalid resource state")
+	ErrPayloadTooLarge     = errors.New("uploaded file too large")
+	ErrUnsupportedFileType = errors.New("unsupported file type")
+	ErrPDFUnprocessable    = errors.New("PDF cannot be processed")
+	ErrExtractionBusy      = errors.New("PDF extraction service is busy")
 )

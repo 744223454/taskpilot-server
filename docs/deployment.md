@@ -9,6 +9,8 @@
 - `postgres`：PostgreSQL 16，已启用持久化卷
 - `redis`：Redis 7，已启用持久化卷
 
+API 与 Worker 共享 `taskpilot_uploads:/app/uploads` 持久化卷。API 在上传请求中同步调用 Poppler 提取 PDF 文字，Worker 在启动时及每 24 小时扫描临时文件和正式孤儿文件。
+
 应用在宿主机监听 `127.0.0.1:8888`。公网流量建议通过 Nginx 或 Caddy 之类的反向代理转发到该地址。
 
 ## 服务器前置条件
@@ -61,6 +63,8 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml exec -T postgres 
 - `TASKPILOT_AUTH_COOKIE_SECURE`
 - `POSTGRES_PASSWORD`
 
+PDF 上传配置可保留在 YAML，也可通过 `.env.prod` 的 `TASKPILOT_UPLOAD_*` 覆盖。生产环境至少应确保 `TASKPILOT_UPLOAD_ROOT=/app/uploads`；默认限制为 10 MiB、50 页、50,000 字符、15 秒提取超时和 2 个并发提取进程。
+
 Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
 
 - `TASKPILOT_AI_API_KEY`
@@ -70,6 +74,8 @@ Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
 - `TASKPILOT_AI_MAX_OUTPUT_TOKENS`，默认 `8000`
 
 Worker 的队列、租约、恢复、心跳和停止参数默认放在 YAML 中，也可通过 `TASKPILOT_WORKER_*` 环境变量覆盖；完整清单以 `internal/config/config.go` 和工作区根目录 `docs/development.md` 为准。环境变量数值无法解析时当前实现会回退 YAML 值，发布后应通过日志和 `/healthz` 核对运行状态。
+
+生产镜像已安装 `poppler-utils`。PDF 原文件保存在共享卷中，不暴露下载接口；文档软删除后 API 尝试立即删除文件，失败时由 Worker 孤儿扫描最终清理。数据库引用查询失败时 Worker 不会删除任何文件。
 
 这样做的好处是：既能让应用保持稳定的 YAML 配置结构，又能避免把生产密钥直接提交到 Git。
 

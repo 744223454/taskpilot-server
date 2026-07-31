@@ -4,6 +4,11 @@ import "time"
 
 const MaxTextDocumentChars = 50000
 
+type CreatePDFDocumentRequest struct {
+	Title    string
+	FileName string
+}
+
 type CreateTextDocumentRequest struct {
 	Title string `json:"title" binding:"required,max=255"`
 	Text  string `json:"text" binding:"required,max=50000"`

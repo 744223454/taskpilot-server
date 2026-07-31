@@ -22,7 +22,7 @@ FROM alpine:3.22
 WORKDIR /app
 
 RUN addgroup -S taskpilot && adduser -S -G taskpilot taskpilot \
-	&& apk add --no-cache ca-certificates tzdata
+	&& apk add --no-cache ca-certificates tzdata poppler-utils
 
 COPY --from=builder /out/taskpilot-api /app/taskpilot-api
 COPY --from=builder /out/taskpilot-worker /app/taskpilot-worker
