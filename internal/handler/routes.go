@@ -20,11 +20,12 @@ const requestTimeout = 30 * time.Second
 // RegisterRoutes wires all HTTP endpoints onto the Gin engine.
 func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	router.Use(middleware.CORS(serverCtx.Config.CORS.AllowedOrigins))
-	router.Use(middleware.Secure(serverCtx.Config.Auth.CookieSecure))
 	router.Use(middleware.Timeout(requestTimeout))
 
 	router.GET("/healthz", HealthHandler(serverCtx))
 	router.GET("/readyz", ReadinessHandler(serverCtx))
+
+	router.Use(middleware.Secure(serverCtx.Config.Auth.CookieSecure))
 
 	api := router.Group("/api/v1")
 	api.Use(middleware.NoCache())

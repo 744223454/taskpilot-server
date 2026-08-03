@@ -147,7 +147,7 @@ POSTGRES_DB=taskpilot_dev \
 
 反向代理需要把你选定的子域名转发到 `http://127.0.0.1:8888`。
 
-当 `TASKPILOT_AUTH_COOKIE_SECURE=true` 时，应用会强制 HTTPS：反向代理必须传递真实协议，例如 Nginx 配置 `proxy_set_header X-Forwarded-Proto $scheme;`。HTTPS 请求会返回 HSTS 响应头，未标记为 HTTPS 的请求会收到 `308` 跳转；代理层也应在流量进入应用前完成 HTTP 到 HTTPS 的跳转。
+当 `TASKPILOT_AUTH_COOKIE_SECURE=true` 时，业务接口会强制 HTTPS：反向代理必须传递真实协议，例如 Nginx 配置 `proxy_set_header X-Forwarded-Proto $scheme;`。HTTPS 请求会返回 HSTS 响应头，未标记为 HTTPS 的业务请求会收到 `308` 跳转；代理层也应在流量进入应用前完成 HTTP 到 HTTPS 的跳转。`/healthz` 与 `/readyz` 明确允许容器内部通过 HTTP 直接探测，不参与 HTTPS 跳转。
 
 API 进程设置了请求头、读写、空闲连接和业务请求超时，并在收到 `SIGINT`/`SIGTERM` 后优雅停止 HTTP 服务，再关闭 PostgreSQL 与 Redis 客户端。所有 `/api/v1` 响应都会设置禁止缓存响应头。
 

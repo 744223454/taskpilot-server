@@ -64,6 +64,41 @@ func TestExampleRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestHealthRoutesAllowInternalHTTPProbeWhenSecureCookiesEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	serviceContext := &svc.ServiceContext{}
+	serviceContext.Config.Auth.CookieSecure = true
+	serviceContext.JWT = jwtauth.NewManager("test-secret", 3600)
+	RegisterRoutes(router, serviceContext)
+
+	for _, testCase := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/healthz", wantStatus: http.StatusOK},
+		{path: "/readyz", wantStatus: http.StatusServiceUnavailable},
+	} {
+		request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+
+		if response.Code != testCase.wantStatus {
+			t.Fatalf("GET %s status = %d, want %d", testCase.path, response.Code, testCase.wantStatus)
+		}
+		if location := response.Header().Get("Location"); location != "" {
+			t.Fatalf("GET %s unexpectedly redirected to %q", testCase.path, location)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusPermanentRedirect {
+		t.Fatalf("GET /api/v1/users/me status = %d, want %d", response.Code, http.StatusPermanentRedirect)
+	}
+}
+
 func TestCreatePDFDocumentRejectsOversizedMultipartBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwtManager := jwtauth.NewManager("test-secret", 3600)
