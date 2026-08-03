@@ -4,6 +4,7 @@ import (
 	"time"
 
 	authhandler "github.com/744223454/taskpilot-server/internal/handler/auth"
+	dashboardhandler "github.com/744223454/taskpilot-server/internal/handler/dashboard"
 	documenthandler "github.com/744223454/taskpilot-server/internal/handler/document"
 	"github.com/744223454/taskpilot-server/internal/handler/middleware"
 	parsejobhandler "github.com/744223454/taskpilot-server/internal/handler/parsejob"
@@ -39,6 +40,8 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.Use(middleware.RequireCSRFForCookieAuth())
 	protected.GET("/users/me", authhandler.MeHandler(serverCtx))
 	protected.PUT("/users/me", middleware.RequireCookieAccess(), middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.UpdateMeHandler(serverCtx))
+	protected.GET("/dashboard/stats", dashboardhandler.StatsHandler(serverCtx))
+	protected.GET("/dashboard/reminders", dashboardhandler.RemindersHandler(serverCtx))
 	protected.POST("/documents/text", middleware.LimitRequestBody(documenthandler.MaxTextDocumentBodyBytes), documenthandler.CreateTextHandler(serverCtx))
 	protected.POST("/documents/pdf", middleware.LimitRequestBody(documenthandler.MaxPDFRequestBodyBytes(serverCtx)), documenthandler.CreatePDFHandler(serverCtx))
 	protected.GET("/documents", documenthandler.ListHandler(serverCtx))
