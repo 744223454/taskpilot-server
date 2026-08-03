@@ -77,6 +77,17 @@ func AuthSourceFrom(c *gin.Context) (AuthSource, bool) {
 	return source, ok
 }
 
+func RequireCookieAccess() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		source, ok := AuthSourceFrom(c)
+		if !ok || source != AuthSourceCookie {
+			writeUnauthorizedMessage(c, "access cookie required")
+			return
+		}
+		c.Next()
+	}
+}
+
 func RequireCSRFForCookieAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		source, ok := AuthSourceFrom(c)

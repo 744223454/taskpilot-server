@@ -12,8 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	logicerrors "github.com/744223454/taskpilot-server/internal/logic"
+	authlogic "github.com/744223454/taskpilot-server/internal/logic/auth"
 	documentlogic "github.com/744223454/taskpilot-server/internal/logic/document"
 	parsejoblogic "github.com/744223454/taskpilot-server/internal/logic/parsejob"
 	parseresultlogic "github.com/744223454/taskpilot-server/internal/logic/parseresult"
@@ -28,6 +30,7 @@ import (
 	"github.com/744223454/taskpilot-server/model/taskmodel"
 	"github.com/744223454/taskpilot-server/model/usermodel"
 	"github.com/744223454/taskpilot-server/pkg/ai"
+	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	cachepkg "github.com/744223454/taskpilot-server/pkg/cache"
 	"github.com/744223454/taskpilot-server/pkg/database"
 	"github.com/744223454/taskpilot-server/pkg/upload"
@@ -75,6 +78,62 @@ func TestIntegrationPDFDocumentLifecycle(t *testing.T) {
 	files, err = fileStore.List(ctx, "documents")
 	if err != nil || len(files) != 0 {
 		t.Fatalf("PDF files after delete = %#v, error = %v", files, err)
+	}
+}
+
+func TestIntegrationUpdateCurrentUserRotatesCurrentSession(t *testing.T) {
+	db := newIntegrationDB(t)
+	redisServer, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer redisServer.Close()
+
+	ctx := context.Background()
+	user := createIntegrationUser(t, db, "profile-update@example.com")
+	redisClient := cachepkg.NewRedis(redisServer.Addr(), "")
+	defer redisClient.Close()
+	store := cachepkg.NewRefreshSessionStore(redisClient)
+	refreshToken, err := jwtauth.GenerateRefreshToken("")
+	if err != nil {
+		t.Fatalf("GenerateRefreshToken() error = %v", err)
+	}
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	if err := store.Create(ctx, jwtauth.RefreshSession{
+		ID:        refreshToken.SessionID,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Nickname:  user.Nickname,
+		ExpiresAt: expiresAt,
+	}, refreshToken.Hash); err != nil {
+		t.Fatalf("create refresh session: %v", err)
+	}
+
+	serviceContext := &svc.ServiceContext{
+		DB:              db,
+		JWT:             jwtauth.NewManager("integration-secret", 900),
+		RefreshSessions: store,
+	}
+	serviceContext.Config.Auth.AccessExpire = 900
+	serviceContext.Config.Auth.RefreshExpire = 3600
+	nickname := " Updated profile "
+	avatarURL := "https://example.com/avatar.png"
+	session, err := authlogic.NewService(ctx, serviceContext).UpdateCurrentUser(user.ID, refreshToken.Raw, &types.UpdateUserRequest{
+		Nickname:  types.OptionalString{Set: true, Value: &nickname},
+		AvatarURL: types.OptionalString{Set: true, Value: &avatarURL},
+	})
+	if err != nil {
+		t.Fatalf("UpdateCurrentUser() error = %v", err)
+	}
+	if session.Response.User.Nickname != "Updated profile" || session.Response.User.AvatarURL == nil || *session.Response.User.AvatarURL != avatarURL {
+		t.Fatalf("updated profile = %#v", session.Response.User)
+	}
+	claims, err := serviceContext.JWT.ParseToken(session.Response.AccessToken)
+	if err != nil || claims.Nickname != "Updated profile" {
+		t.Fatalf("updated access claims = %#v, %v", claims, err)
+	}
+	if _, err := authlogic.NewService(ctx, serviceContext).Refresh(refreshToken.Raw); !errors.Is(err, authlogic.ErrRefreshTokenReused) {
+		t.Fatalf("old refresh token error = %v, want replay rejection", err)
 	}
 }
 

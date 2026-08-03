@@ -22,6 +22,20 @@ func TestLoadAppliesUploadDefaults(t *testing.T) {
 	if configuration.Upload.MaxConcurrentExtractions != 2 || configuration.Upload.ExtractTimeout != 15 || configuration.Upload.SlotWaitTimeout != 3 {
 		t.Fatalf("upload execution defaults = %#v", configuration.Upload)
 	}
+	if configuration.Auth.LoginRateLimit != 10 || configuration.Auth.LoginRateWindow != 300 || configuration.Auth.RegisterRateLimit != 20 || configuration.Auth.RegisterRateWindow != 3600 {
+		t.Fatalf("auth rate limit defaults = %#v", configuration.Auth)
+	}
+}
+
+func TestLoadRejectsInvalidAuthRateLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("Auth:\n  AccessSecret: test-secret\n  AccessExpire: 900\n  LoginRateLimit: -1\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() accepted invalid auth rate limit")
+	}
 }
 
 func TestLoadRejectsInvalidUploadConcurrency(t *testing.T) {

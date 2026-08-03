@@ -3,6 +3,9 @@ Host: 0.0.0.0
 Port: 8888
 Mode: debug
 
+HTTP:
+  TrustedProxies: []
+
 Database:
   DataSource: "postgres://taskpilot:taskpilot@localhost:5432/taskpilot?sslmode=disable"
 
@@ -16,6 +19,10 @@ Auth:
   AccessExpire: 900
   RefreshExpire: 2592000
   CookieSecure: false
+  LoginRateLimit: 10
+  LoginRateWindow: 300
+  RegisterRateLimit: 20
+  RegisterRateWindow: 3600
 
 CORS:
   AllowedOrigins:

@@ -19,6 +19,12 @@ func LoginHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 			response.Error(c, http.StatusBadRequest, bizerrors.CodeBadRequest, err.Error())
 			return
 		}
+		retryAfter, err := enforceLoginRateLimit(c.Request.Context(), svcCtx, c.ClientIP(), req.Email)
+		if err != nil {
+			setRetryAfterHeader(c, retryAfter)
+			writeAuthError(c, svcCtx, err)
+			return
+		}
 
 		resp, err := authlogic.NewService(c.Request.Context(), svcCtx).Login(&req)
 		if err != nil {

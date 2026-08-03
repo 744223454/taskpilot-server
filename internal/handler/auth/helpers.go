@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/744223454/taskpilot-server/internal/handler/common"
+	logicerrors "github.com/744223454/taskpilot-server/internal/logic"
 	authlogic "github.com/744223454/taskpilot-server/internal/logic/auth"
 	"github.com/744223454/taskpilot-server/internal/svc"
 	bizerrors "github.com/744223454/taskpilot-server/pkg/errors"
@@ -20,6 +21,8 @@ func writeAuthError(c *gin.Context, svcCtx *svc.ServiceContext, err error) {
 		response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, err.Error())
 	case errors.Is(err, authlogic.ErrInvalidRefreshToken), errors.Is(err, authlogic.ErrRefreshTokenReused):
 		response.Error(c, http.StatusUnauthorized, bizerrors.CodeUnauthorized, "invalid or expired refresh token")
+	case errors.Is(err, logicerrors.ErrRateLimited):
+		response.Error(c, http.StatusTooManyRequests, bizerrors.CodeTooManyRequests, err.Error())
 	default:
 		common.WriteError(c, svcCtx.Logger, err)
 	}

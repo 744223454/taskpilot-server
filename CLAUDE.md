@@ -31,7 +31,7 @@ TASKPILOT_TEST_DATABASE_DSN='postgres://taskpilot:taskpilot@localhost:5432/taskp
   go test ./internal/logic/ -run TestIntegration -v
 ```
 
-Migrations are plain SQL under `scripts/`, applied via `docker compose exec postgres psql`. `scripts/migrate.sql` is the full schema for a fresh database; the `migrate-*` Make targets are incremental upgrades for existing databases. **When adding a new incremental migration, also wire it into `scripts/deploy_prod.sh` and `scripts/deploy_dev.sh`** — otherwise the SQL lands in the repo but never runs on a server. `scripts/migrate_users_email_normalized.sql` is deliberately not in the deploy scripts and must be run by hand on pre-existing databases.
+Migrations are plain SQL under `scripts/`, applied via `docker compose exec postgres psql`. `scripts/migrate.sql` is the full schema for a fresh database; the `migrate-*` Make targets are incremental upgrades for existing databases. **When adding a new incremental migration, also wire it into `scripts/deploy_prod.sh` and `scripts/deploy_dev.sh`** — otherwise the SQL lands in the repo but never runs on a server. All current incremental migrations, including email normalization, are wired into both deployment scripts and fail closed on conflicting legacy data.
 
 ## Architecture
 
@@ -59,7 +59,7 @@ This is the core of the system and the part worth understanding before touching 
 2. `internal/worker/parsejob` runs N `consumeLoop` goroutines plus four maintenance loops:
    - `reclaimLoop` — `XAUTOCLAIM` idle messages, and reset DB rows stuck in `processing` past `LeaseTimeout` back to `pending` (up to `MaxRecoveries`, then fail them).
    - `reconcileLoop` — scan PostgreSQL for `pending` rows older than `PendingGrace` and republish. **This is what makes a dropped publish self-healing; PostgreSQL is the source of truth, Redis is only a wakeup.**
-   - `heartbeatLoop` — SET a TTL key that `GET /healthz` reads for its `worker` field.
+   - `heartbeatLoop` — SET a TTL key used by `/healthz` status reporting and strict `/readyz` readiness.
    - `trimLoop` — `XTRIM` past `StreamRetention`.
 3. State transitions are compare-and-swap `UPDATE ... WHERE status = ?` and only count as done when `rowsAffected == 1`. Messages are acked only on a terminal state (`success`/`failed`), so a crash mid-parse leaves the message pending for reclaim.
 4. `pkg/ai` calls SoruxGPT `/responses` with `text.format.type = json_schema`, `strict: true`. The response is decoded with `DisallowUnknownFields` and then re-validated in Go (`normalizeAndValidate`) — the schema is not trusted on its own. One retry, only for retryable failures (5xx, 429, transport, malformed output). `PublicErrorMessage` maps errors to user-safe strings stored in `parse_jobs.error_message`; raw errors stay in logs.
@@ -87,13 +87,13 @@ Logic layers return sentinel errors from `internal/logic/errors.go` (`ErrInvalid
 
 Access tokens are hand-rolled HS256 JWTs (`pkg/auth/jwt.go`, no JWT library). Refresh tokens are `sessionID.secret`, stored in Redis as a SHA-256 hash and rotated through a Lua script that atomically detects reuse (`ErrRefreshTokenReused`) and deletes the session.
 
-Two auth transports, one middleware: `RequireAuth` prefers the `Authorization: Bearer` header and falls back to the `access_token` cookie, recording which was used. `RequireCSRFForCookieAuth` then demands a `X-CSRF-Token` header matching the `csrf_token` cookie (constant-time compare) **only for cookie-authenticated unsafe methods** — Bearer callers are exempt. `/auth/refresh` and `/auth/logout` are cookie-and-CSRF only, and the refresh cookie is scoped to `/api/v1/auth`.
+Two auth transports, one middleware: `RequireAuth` prefers the `Authorization: Bearer` header and falls back to the `access_token` cookie, recording which was used. `RequireCSRFForCookieAuth` then demands a `X-CSRF-Token` header matching the `csrf_token` cookie (constant-time compare) **only for cookie-authenticated unsafe methods** — Bearer callers are exempt. `/auth/refresh`, `/auth/logout`, and `PUT /users/me` are cookie-and-CSRF only; the refresh cookie is scoped to `/api/v1`. Profile updates atomically rotate the current device session. Register/login use a Redis sliding-window limiter and fail closed when Redis is unavailable.
 
 `Secure(CookieSecure)` trusts `X-Forwarded-Proto` for HTTPS detection and 308-redirects plain HTTP, so a reverse proxy must set that header in production.
 
 ## Configuration
 
-YAML is the base (`etc/taskpilot-api.yaml`, gitignored; `.example.yaml` variants are committed), with `TASKPILOT_*` environment variables overriding every field via `applyEnvOverrides`. Note the failure mode: an unparseable numeric env var silently falls back to the YAML value rather than erroring, so verify runtime config through logs and `/healthz` after a deploy. Defaults and cross-field validation (e.g. `HeartbeatTTL > HeartbeatInterval`) live in `config.Load`.
+YAML is the base (`etc/taskpilot-api.yaml`, gitignored; `.example.yaml` variants are committed), with `TASKPILOT_*` environment variables overriding every field via `applyEnvOverrides`. Note the failure mode: an unparseable numeric env var silently falls back to the YAML value rather than erroring, so verify runtime config through logs, `/healthz`, and `/readyz` after a deploy. Defaults and cross-field validation (e.g. `HeartbeatTTL > HeartbeatInterval`) live in `config.Load`.
 
 Nothing auto-loads `.env` — neither the Go process nor the Makefile. Source it explicitly (`set -a; . ./.env; set +a`).
 
@@ -101,12 +101,12 @@ Production splits secrets: `.env.prod` for app/database/auth, `.env.worker.prod`
 
 ## Deployment
 
-Single server, Docker Compose. `app` binds `127.0.0.1:8888` behind a reverse proxy; `postgres` and `redis` stay on the internal network. `scripts/deploy_prod.sh` (and `deploy_dev.sh`) validate the AI key, wait for PostgreSQL, run migrations, rebuild the shared image, then roll both containers — migration failure aborts the deploy and leaves the old containers running. GitHub Actions deploys `main` → production and `dev` → development after `make test`. Details in `docs/deployment.md`.
+Single server, Docker Compose. `app` binds `127.0.0.1:8888` behind a reverse proxy; `postgres` and `redis` stay on the internal network. `scripts/deploy_prod.sh` (and `deploy_dev.sh`) validate the AI key, wait for PostgreSQL, run migrations, rebuild the shared image, roll both containers, and wait for strict `/readyz`. GitHub Actions runs unit tests, PostgreSQL integration tests, and a real API/Worker process smoke test before deploying `main` → production or `dev` → development. Details in `docs/deployment.md`.
 
 The dev environment reuses the production `taskpilot-postgres` container over an external network but **must** point at the separate `taskpilot_dev` database.
 
 ## Current scope
 
-Implemented: auth (register/login/refresh/logout/me), text documents, parse jobs, parse results, `POST /projects`. Not yet implemented: project CRUD, task CRUD/status/ordering, PDF upload and text extraction, history. `internal/handler/task/` and `internal/logic/task/` are empty placeholders, and `pkg/upload` is a stub.
+Implemented: auth including profile update/session rotation and register/login rate limiting; text/PDF documents and extraction; parse jobs/results; project/task CRUD, status and ordering; history; liveness/readiness; deployment migrations and CI process smoke tests. Parse-status caching remains intentionally deferred until measurements justify it.
 
-`docs/openapi.yaml` is the API contract and is kept in sync by hand — update it when adding or changing an endpoint. `GET /from/:name` and `internal/logic/taskpilotlogic.go` are leftover scaffolding.
+`docs/openapi.yaml` is the API contract and is kept in sync by hand — update it when adding or changing an endpoint.

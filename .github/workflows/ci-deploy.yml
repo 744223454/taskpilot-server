@@ -13,6 +13,30 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: taskpilot
+          POSTGRES_USER: taskpilot
+          POSTGRES_PASSWORD: taskpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taskpilot -d taskpilot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     defaults:
       run:
         working-directory: .
@@ -27,10 +51,38 @@ jobs:
           go-version: '1.26.5'
 
       - name: Install Poppler
-        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils postgresql-client
 
-      - name: Run tests
+      - name: Run unit tests
         run: make test
+
+      - name: Run PostgreSQL integration tests
+        env:
+          TASKPILOT_TEST_DATABASE_DSN: postgres://taskpilot:taskpilot@localhost:5432/taskpilot?sslmode=disable
+        run: go test ./internal/logic -run '^TestIntegration' -count=1
+
+      - name: Build API and Worker
+        run: make build
+
+      - name: Initialize smoke-test database
+        env:
+          PGPASSWORD: taskpilot
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U taskpilot -d taskpilot < scripts/migrate.sql
+
+      - name: Run process smoke tests
+        env:
+          TASKPILOT_DATABASE_DSN: postgres://taskpilot:taskpilot@localhost:5432/taskpilot?sslmode=disable
+          TASKPILOT_REDIS_HOST: localhost:6379
+          TASKPILOT_AUTH_ACCESS_SECRET: taskpilot-ci-smoke-secret
+          TASKPILOT_AUTH_ACCESS_EXPIRE: 900
+          TASKPILOT_AUTH_REFRESH_EXPIRE: 3600
+          TASKPILOT_AUTH_COOKIE_SECURE: "false"
+          TASKPILOT_AI_BASE_URL: http://127.0.0.1:9/v1
+          TASKPILOT_AI_API_KEY: taskpilot-ci-placeholder
+          TASKPILOT_AI_MODEL: taskpilot-ci-placeholder
+          TASKPILOT_WORKER_HEARTBEAT_INTERVAL: 1
+          TASKPILOT_WORKER_HEARTBEAT_TTL: 5
+        run: bash scripts/ci_smoke_test.sh
 
   deploy-production:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

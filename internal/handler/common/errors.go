@@ -34,6 +34,8 @@ func WriteError(c *gin.Context, logger *slog.Logger, err error) {
 		response.Error(c, http.StatusUnprocessableEntity, bizerrors.CodePDFUnprocessable, err.Error())
 	case errors.Is(err, logicerrors.ErrExtractionBusy):
 		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeServiceUnavailable, err.Error())
+	case errors.Is(err, logicerrors.ErrRateLimited):
+		response.Error(c, http.StatusTooManyRequests, bizerrors.CodeTooManyRequests, err.Error())
 	case errors.Is(err, logicerrors.ErrDatabaseUnavailable):
 		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeDatabaseUnavailable, err.Error())
 	case errors.Is(err, logicerrors.ErrCacheUnavailable):

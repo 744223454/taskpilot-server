@@ -34,6 +34,7 @@ type RefreshSession struct {
 type RefreshSessionStore interface {
 	Create(ctx context.Context, session RefreshSession, tokenHash string) error
 	Rotate(ctx context.Context, sessionID, currentHash, replacementHash string, now time.Time) (RefreshSession, error)
+	RotateProfile(ctx context.Context, sessionID, currentHash, replacementHash string, userID int64, nickname string, avatarURL *string, now time.Time) (RefreshSession, error)
 	Revoke(ctx context.Context, sessionID, tokenHash string) error
 }
 
