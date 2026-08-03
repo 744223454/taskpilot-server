@@ -20,11 +20,12 @@ const requestTimeout = 30 * time.Second
 // RegisterRoutes wires all HTTP endpoints onto the Gin engine.
 func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	router.Use(middleware.CORS(serverCtx.Config.CORS.AllowedOrigins))
-	router.Use(middleware.Secure(serverCtx.Config.Auth.CookieSecure))
 	router.Use(middleware.Timeout(requestTimeout))
 
 	router.GET("/healthz", HealthHandler(serverCtx))
-	router.GET("/from/:name", TaskpilotHandler(serverCtx))
+	router.GET("/readyz", ReadinessHandler(serverCtx))
+
+	router.Use(middleware.Secure(serverCtx.Config.Auth.CookieSecure))
 
 	api := router.Group("/api/v1")
 	api.Use(middleware.NoCache())
@@ -37,6 +38,7 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	protected.Use(middleware.RequireAuth(serverCtx))
 	protected.Use(middleware.RequireCSRFForCookieAuth())
 	protected.GET("/users/me", authhandler.MeHandler(serverCtx))
+	protected.PUT("/users/me", middleware.RequireCookieAccess(), middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.UpdateMeHandler(serverCtx))
 	protected.POST("/documents/text", middleware.LimitRequestBody(documenthandler.MaxTextDocumentBodyBytes), documenthandler.CreateTextHandler(serverCtx))
 	protected.POST("/documents/pdf", middleware.LimitRequestBody(documenthandler.MaxPDFRequestBodyBytes(serverCtx)), documenthandler.CreatePDFHandler(serverCtx))
 	protected.GET("/documents", documenthandler.ListHandler(serverCtx))

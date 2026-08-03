@@ -82,11 +82,26 @@ wait_for_postgres() {
 apply_incremental_migrations() {
 	echo "applying incremental database migrations to $POSTGRES_DB via $POSTGRES_CONTAINER"
 	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+		< "$ROOT_DIR/scripts/migrate_users_email_normalized.sql"
+	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 		< "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
 	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 		< "$ROOT_DIR/scripts/migrate_projects_parse_result_unique.sql"
 	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 		< "$ROOT_DIR/scripts/migrate_projects_tasks_version.sql"
+}
+
+wait_for_application() {
+	attempts=0
+	until compose exec -T app wget -q -O /dev/null http://127.0.0.1:8888/readyz; do
+		attempts=$((attempts + 1))
+		if [ "$attempts" -ge 30 ]; then
+			echo "application did not become ready in time"
+			compose logs app worker
+			exit 1
+		fi
+		sleep 2
+	done
 }
 
 compose config --quiet
@@ -96,3 +111,4 @@ compose up -d redis
 wait_for_postgres
 apply_incremental_migrations
 compose up -d app worker
+wait_for_application

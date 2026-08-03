@@ -15,6 +15,10 @@ type Config struct {
 	Port int    `yaml:"Port"`
 	Mode string `yaml:"Mode"`
 
+	HTTP struct {
+		TrustedProxies []string `yaml:"TrustedProxies"`
+	} `yaml:"HTTP"`
+
 	// Database holds PostgreSQL connection settings.
 	Database struct {
 		DataSource string `yaml:"DataSource"`
@@ -29,10 +33,14 @@ type Config struct {
 
 	// Auth holds JWT signing settings.
 	Auth struct {
-		AccessSecret  string `yaml:"AccessSecret"`
-		AccessExpire  int64  `yaml:"AccessExpire"`
-		RefreshExpire int64  `yaml:"RefreshExpire"`
-		CookieSecure  bool   `yaml:"CookieSecure"`
+		AccessSecret       string `yaml:"AccessSecret"`
+		AccessExpire       int64  `yaml:"AccessExpire"`
+		RefreshExpire      int64  `yaml:"RefreshExpire"`
+		CookieSecure       bool   `yaml:"CookieSecure"`
+		LoginRateLimit     int64  `yaml:"LoginRateLimit"`
+		LoginRateWindow    int64  `yaml:"LoginRateWindow"`
+		RegisterRateLimit  int64  `yaml:"RegisterRateLimit"`
+		RegisterRateWindow int64  `yaml:"RegisterRateWindow"`
 	} `yaml:"Auth"`
 
 	// CORS holds cross-origin resource sharing settings for the API.
@@ -116,6 +124,9 @@ func Load(path string) (Config, error) {
 	if cfg.Auth.RefreshExpire < 0 {
 		return cfg, fmt.Errorf("config Auth.RefreshExpire must not be negative")
 	}
+	if err := applyAuthRateLimitDefaults(&cfg); err != nil {
+		return cfg, err
+	}
 
 	if len(cfg.CORS.AllowedOrigins) == 0 {
 		cfg.CORS.AllowedOrigins = defaultCORSOrigins()
@@ -158,6 +169,28 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func applyAuthRateLimitDefaults(cfg *Config) error {
+	settings := []struct {
+		name         string
+		value        *int64
+		defaultValue int64
+	}{
+		{"LoginRateLimit", &cfg.Auth.LoginRateLimit, 10},
+		{"LoginRateWindow", &cfg.Auth.LoginRateWindow, 5 * 60},
+		{"RegisterRateLimit", &cfg.Auth.RegisterRateLimit, 20},
+		{"RegisterRateWindow", &cfg.Auth.RegisterRateWindow, 60 * 60},
+	}
+	for _, setting := range settings {
+		if *setting.value < 0 {
+			return fmt.Errorf("config Auth.%s must not be negative", setting.name)
+		}
+		if *setting.value == 0 {
+			*setting.value = setting.defaultValue
+		}
+	}
+	return nil
 }
 
 func applyUploadDefaults(cfg *Config) error {
@@ -257,6 +290,7 @@ func applyEnvOverrides(cfg *Config) {
 	cfg.Host = envString("TASKPILOT_HOST", cfg.Host)
 	cfg.Port = envInt("TASKPILOT_PORT", cfg.Port)
 	cfg.Mode = envString("TASKPILOT_MODE", cfg.Mode)
+	cfg.HTTP.TrustedProxies = envStringSlice("TASKPILOT_HTTP_TRUSTED_PROXIES", cfg.HTTP.TrustedProxies)
 
 	cfg.Database.DataSource = envString("TASKPILOT_DATABASE_DSN", cfg.Database.DataSource)
 
@@ -268,6 +302,10 @@ func applyEnvOverrides(cfg *Config) {
 	cfg.Auth.AccessExpire = envInt64("TASKPILOT_AUTH_ACCESS_EXPIRE", cfg.Auth.AccessExpire)
 	cfg.Auth.RefreshExpire = envInt64("TASKPILOT_AUTH_REFRESH_EXPIRE", cfg.Auth.RefreshExpire)
 	cfg.Auth.CookieSecure = envBool("TASKPILOT_AUTH_COOKIE_SECURE", cfg.Auth.CookieSecure)
+	cfg.Auth.LoginRateLimit = envInt64("TASKPILOT_AUTH_LOGIN_RATE_LIMIT", cfg.Auth.LoginRateLimit)
+	cfg.Auth.LoginRateWindow = envInt64("TASKPILOT_AUTH_LOGIN_RATE_WINDOW", cfg.Auth.LoginRateWindow)
+	cfg.Auth.RegisterRateLimit = envInt64("TASKPILOT_AUTH_REGISTER_RATE_LIMIT", cfg.Auth.RegisterRateLimit)
+	cfg.Auth.RegisterRateWindow = envInt64("TASKPILOT_AUTH_REGISTER_RATE_WINDOW", cfg.Auth.RegisterRateWindow)
 
 	cfg.CORS.AllowedOrigins = envStringSlice("TASKPILOT_CORS_ALLOWED_ORIGINS", cfg.CORS.AllowedOrigins)
 

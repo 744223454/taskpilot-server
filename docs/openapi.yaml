@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -9,15 +9,15 @@ info:
     - 本文件托管在 `taskpilot-server` 仓库内，适合直接导入 Apifox 调试或通过 GitHub Raw URL 持续同步
     - 当前已实现接口统一返回响应信封 `{ code, message, data }`，错误响应的 `data` 为 `null`
     - 受保护接口支持 Bearer Token 或 `access_token` Cookie；Cookie 鉴权的写请求还必须携带与 `csrf_token` Cookie 相同的 `X-CSRF-Token`
-    - `/auth/refresh` 与 `/auth/logout` 强制使用 `refresh_token` Cookie 和 CSRF Header
-    - 项目、任务管理和历史只读接口已经接入；PDF 上传与用户资料修改仍未实现
-    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体或文件过大, 10010=服务不可用, 10011=禁止访问, 10012=文件类型不支持, 10013=PDF 无法处理
+    - `/auth/refresh`、`/auth/logout` 与 `PUT /users/me` 强制使用 `refresh_token` Cookie 和 CSRF Header
+    - 注册按客户端 IP、登录按客户端 IP 与规范化邮箱执行 Redis 滑动窗口限流
+    - 业务错误码：0=ok, 10001=参数无效, 10002=未授权, 10003=邮箱已注册, 10004=数据库不可用, 10005=内部错误, 10006=资源不存在, 10007=资源冲突, 10008=状态非法, 10009=请求体或文件过大, 10010=服务不可用, 10011=禁止访问, 10012=文件类型不支持, 10013=PDF 无法处理, 10014=请求过于频繁
 servers:
   - url: http://localhost:8888
     description: Local development server
 tags:
   - name: System
-    description: 系统与示例接口
+    description: 系统接口
   - name: Auth
     description: 认证接口
   - name: Documents
@@ -57,46 +57,36 @@ paths:
                       db: true
                       redis: true
                       worker: true
-  /from/{name}:
+  /readyz:
     get:
       tags:
         - System
-      summary: 示例接口
-      description: 返回 `hello {name}` 的示例响应。
-      operationId: getHelloFromName
-      parameters:
-        - name: name
-          in: path
-          required: true
-          description: 示例名称
-          schema:
-            type: string
+      summary: 就绪检查
+      description: 仅当 PostgreSQL、Redis 与解析 Worker 心跳全部可用时返回 200，否则返回 503。
+      operationId: getReadyz
       responses:
         "200":
-          description: 请求成功
+          description: 核心依赖全部就绪
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HelloEnvelope"
+                $ref: "#/components/schemas/HealthEnvelope"
               examples:
                 default:
                   value:
                     code: 0
                     message: ok
                     data:
-                      message: hello zmk
-        "500":
-          description: 服务端错误
+                      status: ready
+                      db: true
+                      redis: true
+                      worker: true
+        "503":
+          description: 至少一个核心依赖未就绪
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-              examples:
-                default:
-                  value:
-                    code: 10005
-                    message: internal server error
-                    data: null
   /api/v1/auth/register:
     post:
       tags:
@@ -154,6 +144,17 @@ paths:
                     code: 10003
                     message: email already registered
                     data: null
+        "429":
+          description: 同一客户端 IP 一小时内注册请求超过 20 次；响应包含 `Retry-After`
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: 建议等待秒数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "503":
           description: 数据库或 Redis Refresh 会话不可用
           content:
@@ -233,6 +234,17 @@ paths:
                     code: 10002
                     message: invalid email or password
                     data: null
+        "429":
+          description: 同一客户端 IP 与规范化邮箱五分钟内登录请求超过 10 次；响应包含 `Retry-After`
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: 建议等待秒数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "503":
           description: 数据库或 Redis Refresh 会话不可用
           content:
@@ -420,6 +432,64 @@ paths:
                     code: 10005
                     message: internal server error
                     data: null
+    put:
+      tags:
+        - Auth
+      summary: 修改当前用户资料
+      description: |
+        部分更新昵称和头像。两个字段均可选，但请求至少包含一个字段；`avatar_url: null` 或空字符串会清空头像。
+
+        该接口要求 Access Cookie、Refresh Cookie 与 CSRF Header。成功时原子轮换当前设备 Refresh 会话、签发新 Access Token，并重写 Access/Refresh/CSRF Cookie；其他设备会话不变。
+      operationId: updateCurrentUser
+      security:
+        - accessCookie: []
+          refreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+            examples:
+              updateNickname:
+                value:
+                  nickname: 新昵称
+              clearAvatar:
+                value:
+                  avatar_url: null
+      responses:
+        "200":
+          description: 资料更新并完成当前设备会话轮换
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+        "400":
+          description: 空请求、昵称为空或字段长度超限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Access 或 Refresh Token 缺失、无效、过期或不属于同一用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: CSRF Cookie/Header 缺失或不匹配
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: PostgreSQL 或 Redis 不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/documents/text:
     post:
       tags: [Documents]
@@ -2155,23 +2225,6 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/HealthPayload"
-    HelloResponse:
-      type: object
-      required:
-        - message
-      properties:
-        message:
-          type: string
-          example: hello zmk
-    HelloEnvelope:
-      allOf:
-        - $ref: "#/components/schemas/Envelope"
-        - type: object
-          required:
-            - data
-          properties:
-            data:
-              $ref: "#/components/schemas/HelloResponse"
     RegisterRequest:
       type: object
       required:
@@ -2206,6 +2259,21 @@ components:
           type: string
           minLength: 8
           example: "TP-12ddf1c35b9c480a21cc9df5"
+    UpdateUserRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: 新昵称
+        avatar_url:
+          type: string
+          maxLength: 255
+          nullable: true
+          example: https://example.com/avatar.png
     UserProfile:
       type: object
       required:

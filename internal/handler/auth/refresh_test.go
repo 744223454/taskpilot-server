@@ -28,6 +28,10 @@ func (s *fakeRefreshSessionStore) Rotate(context.Context, string, string, string
 	return s.session, nil
 }
 
+func (s *fakeRefreshSessionStore) RotateProfile(context.Context, string, string, string, int64, string, *string, time.Time) (jwtauth.RefreshSession, error) {
+	return s.session, nil
+}
+
 func (s *fakeRefreshSessionStore) Revoke(context.Context, string, string) error {
 	s.revoked = true
 	return nil
@@ -67,14 +71,14 @@ func TestRefreshHandlerSetsRotatedHttpOnlyCookies(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 	setCookies := response.Header().Values("Set-Cookie")
-	if len(setCookies) != 3 {
-		t.Fatalf("Set-Cookie count = %d, want 3: %v", len(setCookies), setCookies)
+	if len(setCookies) != 4 {
+		t.Fatalf("Set-Cookie count = %d, want 4: %v", len(setCookies), setCookies)
 	}
 	joinedCookies := strings.Join(setCookies, "\n")
 	if !strings.Contains(joinedCookies, "access_token=") || !strings.Contains(joinedCookies, "HttpOnly") || !strings.Contains(joinedCookies, "Secure") || !strings.Contains(joinedCookies, "SameSite=Lax") {
 		t.Fatalf("access cookie attributes missing: %s", joinedCookies)
 	}
-	if !strings.Contains(joinedCookies, "refresh_token=") || !strings.Contains(joinedCookies, "Path=/api/v1/auth") {
+	if !strings.Contains(joinedCookies, "refresh_token=") || !strings.Contains(joinedCookies, "Path=/api/v1") {
 		t.Fatalf("refresh cookie attributes missing: %s", joinedCookies)
 	}
 }

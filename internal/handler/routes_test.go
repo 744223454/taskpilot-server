@@ -26,6 +26,7 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodGet, path: "/api/v1/users/me"},
+		{method: http.MethodPut, path: "/api/v1/users/me"},
 		{method: http.MethodGet, path: "/api/v1/documents"},
 		{method: http.MethodPost, path: "/api/v1/documents/pdf"},
 		{method: http.MethodGet, path: "/api/v1/parse-jobs/1/result"},
@@ -46,6 +47,55 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("%s %s status = %d, want %d", testCase.method, testCase.path, response.Code, http.StatusUnauthorized)
 		}
+	}
+}
+
+func TestExampleRouteIsNotRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterRoutes(router, &svc.ServiceContext{})
+
+	request := httptest.NewRequest(http.MethodGet, "/from/taskpilot", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("GET /from/taskpilot status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestHealthRoutesAllowInternalHTTPProbeWhenSecureCookiesEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	serviceContext := &svc.ServiceContext{}
+	serviceContext.Config.Auth.CookieSecure = true
+	serviceContext.JWT = jwtauth.NewManager("test-secret", 3600)
+	RegisterRoutes(router, serviceContext)
+
+	for _, testCase := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/healthz", wantStatus: http.StatusOK},
+		{path: "/readyz", wantStatus: http.StatusServiceUnavailable},
+	} {
+		request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+
+		if response.Code != testCase.wantStatus {
+			t.Fatalf("GET %s status = %d, want %d", testCase.path, response.Code, testCase.wantStatus)
+		}
+		if location := response.Header().Get("Location"); location != "" {
+			t.Fatalf("GET %s unexpectedly redirected to %q", testCase.path, location)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusPermanentRedirect {
+		t.Fatalf("GET /api/v1/users/me status = %d, want %d", response.Code, http.StatusPermanentRedirect)
 	}
 }
 

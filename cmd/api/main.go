@@ -44,6 +44,9 @@ func run() (runErr error) {
 	gin.SetMode(c.Mode)
 
 	router := gin.Default()
+	if err := router.SetTrustedProxies(c.HTTP.TrustedProxies); err != nil {
+		return fmt.Errorf("configure trusted proxies: %w", err)
+	}
 
 	serverContext := svc.NewServiceContext(c)
 	defer func() {

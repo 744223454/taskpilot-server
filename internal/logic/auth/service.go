@@ -14,6 +14,7 @@ import (
 	jwtauth "github.com/744223454/taskpilot-server/pkg/auth"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrEmailRegistered = errors.New("email already registered")
@@ -206,6 +207,113 @@ func (s *Service) CurrentUserByID(userID int64) (*types.UserProfile, error) {
 		Email:     user.Email,
 		Nickname:  user.Nickname,
 		AvatarURL: user.AvatarURL,
+	}, nil
+}
+
+func (s *Service) UpdateCurrentUser(userID int64, rawRefreshToken string, req *types.UpdateUserRequest) (*AuthSession, error) {
+	if err := s.requireDB(); err != nil {
+		return nil, err
+	}
+	if err := s.requireJWT(); err != nil {
+		return nil, err
+	}
+	if err := s.requireRefreshSessions(); err != nil {
+		return nil, err
+	}
+	if req == nil || (!req.Nickname.Set && !req.AvatarURL.Set) {
+		return nil, logicerrors.ErrInvalidInput
+	}
+
+	currentToken, err := jwtauth.ParseRefreshToken(rawRefreshToken)
+	if err != nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	replacementToken, err := jwtauth.GenerateRefreshToken(currentToken.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("generate profile replacement refresh token: %w", err)
+	}
+
+	var updatedUser usermodel.User
+	var rotatedSession jwtauth.RefreshSession
+	rotatedProfileSession := false
+	err = s.svcCtx.DB.Transaction(func(tx *gorm.DB) error {
+		user, findErr := gorm.G[usermodel.User](tx, clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", userID).
+			First(s.ctx)
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return ErrInvalidAccessToken
+		}
+		if findErr != nil {
+			return fmt.Errorf("find current user for update: %w", findErr)
+		}
+
+		updates := map[string]any{}
+		if req.Nickname.Set {
+			if req.Nickname.Value == nil {
+				return logicerrors.ErrInvalidInput
+			}
+			nickname := strings.TrimSpace(*req.Nickname.Value)
+			if nickname == "" || len([]rune(nickname)) > 64 {
+				return logicerrors.ErrInvalidInput
+			}
+			user.Nickname = nickname
+			updates["nickname"] = nickname
+		}
+		if req.AvatarURL.Set {
+			var avatarURL *string
+			if req.AvatarURL.Value != nil {
+				normalized := strings.TrimSpace(*req.AvatarURL.Value)
+				if normalized != "" {
+					if len(normalized) > 255 {
+						return logicerrors.ErrInvalidInput
+					}
+					avatarURL = &normalized
+				}
+			}
+			user.AvatarURL = avatarURL
+			updates["avatar_url"] = avatarURL
+		}
+		if _, updateErr := gorm.G[usermodel.User](tx).
+			Where("id = ?", userID).
+			Set(clause.Assignments(updates)).
+			Update(s.ctx); updateErr != nil {
+			return fmt.Errorf("update current user: %w", updateErr)
+		}
+
+		rotated, rotateErr := s.svcCtx.RefreshSessions.RotateProfile(
+			s.ctx,
+			currentToken.SessionID,
+			currentToken.Hash,
+			replacementToken.Hash,
+			userID,
+			user.Nickname,
+			user.AvatarURL,
+			time.Now().UTC(),
+		)
+		if rotateErr != nil {
+			return mapRefreshSessionError("rotate profile refresh session", rotateErr)
+		}
+		updatedUser = user
+		rotatedSession = rotated
+		rotatedProfileSession = true
+		return nil
+	})
+	if err != nil {
+		if rotatedProfileSession {
+			s.revokeIssuedSession(replacementToken.Raw)
+		}
+		return nil, err
+	}
+
+	accessToken, err := issueToken(s.svcCtx.JWT, updatedUser)
+	if err != nil {
+		s.revokeIssuedSession(replacementToken.Raw)
+		return nil, fmt.Errorf("issue profile access token: %w", err)
+	}
+	return &AuthSession{
+		Response:         newAuthResponse(updatedUser, accessToken, s.svcCtx.Config.Auth.AccessExpire),
+		RefreshToken:     replacementToken.Raw,
+		RefreshExpiresAt: rotatedSession.ExpiresAt,
 	}, nil
 }
 

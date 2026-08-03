@@ -15,4 +15,5 @@ const (
 	CodeForbidden           = 10011
 	CodeUnsupportedFileType = 10012
 	CodePDFUnprocessable    = 10013
+	CodeTooManyRequests     = 10014
 )

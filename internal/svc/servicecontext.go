@@ -24,6 +24,7 @@ type ServiceContext struct {
 	JWT             *jwtauth.Manager
 	Redis           *redis.Client
 	RefreshSessions jwtauth.RefreshSessionStore
+	AuthRateLimiter cachepkg.AuthRateLimiter
 	ParseJobs       cachepkg.ParseJobQueue
 	Parser          ai.Parser
 	Files           upload.FileStore
@@ -71,6 +72,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	redisClient := cachepkg.NewRedis(c.Cache.Host, c.Cache.Pass)
 	serverContext.Redis = redisClient
 	serverContext.RefreshSessions = cachepkg.NewRefreshSessionStore(redisClient)
+	serverContext.AuthRateLimiter = cachepkg.NewAuthRateLimiter(redisClient)
 	serverContext.ParseJobs = cachepkg.NewParseJobQueue(redisClient, c.Worker.StreamKey, c.Worker.ConsumerGroup)
 	pingContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

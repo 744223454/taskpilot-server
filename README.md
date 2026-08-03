@@ -2,7 +2,7 @@
 
 基于 `Gin + Gorm + PostgreSQL` 的 TaskPilot 后端服务仓库。
 
-当前阶段已经打通“文本文档 -> 异步 AI 解析 -> 结果编辑确认 -> 保存项目 -> 项目与任务管理 -> 历史查询”的后端链路，并可部署到单台云服务器上的 Docker Compose 环境。产品级 MVP 仍需完成前端主业务联调与 PDF 输入。
+当前后端已经打通“文本/PDF 文档 -> 异步 AI 解析 -> 结果编辑确认 -> 保存项目 -> 项目与任务管理 -> 历史查询”链路，并可部署到单台云服务器上的 Docker Compose 环境。产品级 MVP 仍需完成前端主业务联调。
 
 ## 当前状态
 
@@ -11,7 +11,9 @@
 - Gin 服务入口
 - Gorm + PostgreSQL 连接初始化
 - JWT 注册、登录、鉴权
-- Redis Refresh 会话、HttpOnly Cookie、CSRF 防护和当前设备登出
+- Redis Refresh 会话、HttpOnly Cookie、CSRF 防护、当前设备登出和资料更新会话轮换
+- 注册/登录 Redis 滑动窗口限流
+- 文字型 PDF 上传、文件存储与 Poppler 文本提取
 - Redis Streams 解析队列与独立 Worker 进程
 - SoruxGPT `/responses` 严格 JSON Schema 结构化解析
 - 解析结果查询、乐观锁编辑与幂等确认
@@ -26,13 +28,13 @@
   - `Dockerfile`
   - `docker-compose.prod.yml`
   - `scripts/deploy_prod.sh`
-  - GitHub Actions 自动测试与部署工作流
+- GitHub Actions 自动测试与部署工作流
+- PostgreSQL 集成测试与 API/Worker 真实进程冒烟门禁
 
 待补充：
 
 - P0：同步 OpenAPI 和前端 API，完成文本主链路端到端回归
-- P1：PDF 上传、文件存储和文字型 PDF 文本提取
-- P1/P2：当前用户资料修改、登录限流；解析状态缓存按性能数据决定
+- 解析状态缓存仅在有明确性能数据后决定是否接入
 
 项目创建采用一个解析结果只生成一个项目的幂等契约，并由 `uq_projects_parse_result_id` 唯一索引兜底。首次创建返回 `201`；重复或并发请求返回首次项目与任务，状态码为 `200`。
 
@@ -126,6 +128,7 @@ etc/taskpilot-api.yaml
 
 - `TASKPILOT_HOST`
 - `TASKPILOT_PORT`
+- `TASKPILOT_HTTP_TRUSTED_PROXIES`
 - `TASKPILOT_DATABASE_DSN`
 - `TASKPILOT_REDIS_HOST`
 - `TASKPILOT_REDIS_PASS`
@@ -133,6 +136,10 @@ etc/taskpilot-api.yaml
 - `TASKPILOT_AUTH_ACCESS_EXPIRE`
 - `TASKPILOT_AUTH_REFRESH_EXPIRE`
 - `TASKPILOT_AUTH_COOKIE_SECURE`
+- `TASKPILOT_AUTH_LOGIN_RATE_LIMIT`
+- `TASKPILOT_AUTH_LOGIN_RATE_WINDOW`
+- `TASKPILOT_AUTH_REGISTER_RATE_LIMIT`
+- `TASKPILOT_AUTH_REGISTER_RATE_WINDOW`
 - `TASKPILOT_CORS_ALLOWED_ORIGINS`
 - `TASKPILOT_AI_API_KEY`
 - `TASKPILOT_AI_BASE_URL`
@@ -153,12 +160,14 @@ etc/taskpilot-api.yaml
 
 ```http
 GET  /healthz
-GET  /from/:name
+GET  /readyz
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/users/me
+PUT  /api/v1/users/me
+POST /api/v1/documents/pdf
 POST /api/v1/documents/text
 GET  /api/v1/documents
 GET  /api/v1/documents/:documentId
@@ -204,7 +213,7 @@ make migrate-projects-parse-result-unique
 make migrate-projects-tasks-version
 ```
 
-邮箱规范化迁移 `scripts/migrate_users_email_normalized.sql` 当前未纳入部署脚本。新库的基础迁移已经包含 `LOWER(email)` 唯一索引；旧库升级时需要在发布前显式执行 `make migrate-users-email-normalized`（或在目标 Compose 中执行同一 SQL）。
+邮箱规范化迁移 `scripts/migrate_users_email_normalized.sql` 已纳入开发和生产部署脚本。若旧库存在规范化后冲突的邮箱，部署会停止且不会自动合并账号；人工清理后重新发布。
 
 统一返回格式：
 
