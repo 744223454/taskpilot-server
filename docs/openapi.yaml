@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -20,6 +20,8 @@ tags:
     description: 系统接口
   - name: Auth
     description: 认证接口
+  - name: Dashboard
+    description: 工作台统计与提醒
   - name: Documents
     description: 文档录入与查询
   - name: ParseJobs
@@ -1552,6 +1554,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: 查询工作台概览统计
+      description: |
+        返回当前用户的文档总数、解析任务总数、进行中项目数和待办任务数。
+
+        文档总数不包含已软删除文档；待办任务指 active 项目内状态为 todo 或 doing 的任务。
+      operationId: getDashboardStats
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStatsEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/dashboard/reminders:
+    get:
+      tags: [Dashboard]
+      summary: 查询今日提醒
+      description: |
+        返回当前时刻起 7×24 小时内到期的任务，最多 10 条，按截止时间和任务 ID 升序排列。
+
+        仅包含 active 项目内状态为 todo 或 doing 的任务；已完成、已过期、无截止时间以及归档/删除项目任务均不返回。`days_left` 按剩余时长向上取整，不足 24 小时为 1，恰好到期为 0。
+      operationId: getDashboardReminders
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardReminderListEnvelope"
+        "401":
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 数据库未连接
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/projects:
     get:
       tags: [Projects]
@@ -2582,6 +2658,56 @@ components:
             updated_at:
               type: string
               format: date-time
+    DashboardStats:
+      type: object
+      required: [documents, parse_jobs, active_projects, open_tasks]
+      properties:
+        documents:
+          type: integer
+          format: int64
+          minimum: 0
+        parse_jobs:
+          type: integer
+          format: int64
+          minimum: 0
+        active_projects:
+          type: integer
+          format: int64
+          minimum: 0
+        open_tasks:
+          type: integer
+          format: int64
+          minimum: 0
+    DashboardReminder:
+      type: object
+      required: [id, project_id, title, project, deadline, days_left]
+      properties:
+        id:
+          type: integer
+          format: int64
+        project_id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        project:
+          type: string
+        deadline:
+          type: string
+          format: date-time
+        days_left:
+          type: integer
+          minimum: 0
+          maximum: 7
+    DashboardReminderList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/DashboardReminder"
     CreateProjectRequest:
       type: object
       required: [parse_result_id, name]
@@ -2834,6 +2960,22 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ParseResultList"
+    DashboardStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/DashboardStats"
+    DashboardReminderListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/DashboardReminderList"
     ProjectEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"

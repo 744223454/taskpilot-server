@@ -79,7 +79,7 @@ Every query is scoped `WHERE id = ? AND user_id = ?`. There is no shared-ownersh
 
 ### Errors and responses
 
-All responses use `pkg/response.Envelope` — `{code, message, data}`, `code: 0` on success, `data: null` on error. Business codes live in `pkg/errors/code.go` (10001–10011) and are documented in `docs/openapi.yaml`.
+All responses use `pkg/response.Envelope` — `{code, message, data}`, `code: 0` on success, `data: null` on error. Business codes live in `pkg/errors/code.go` (10001–10014) and are documented in `docs/openapi.yaml`.
 
 Logic layers return sentinel errors from `internal/logic/errors.go` (`ErrInvalidInput`, `ErrNotFound`, `ErrConflict`, `ErrInvalidState`, `ErrDatabaseUnavailable`, `ErrCacheUnavailable`), optionally wrapped with `fmt.Errorf("%w: detail", ...)`. `internal/handler/common.WriteError` is the single place that maps them to HTTP status + business code; the `default` branch logs and returns a generic 500 so internal messages never leak. Handlers should not build error responses themselves.
 
@@ -89,7 +89,7 @@ Access tokens are hand-rolled HS256 JWTs (`pkg/auth/jwt.go`, no JWT library). Re
 
 Two auth transports, one middleware: `RequireAuth` prefers the `Authorization: Bearer` header and falls back to the `access_token` cookie, recording which was used. `RequireCSRFForCookieAuth` then demands a `X-CSRF-Token` header matching the `csrf_token` cookie (constant-time compare) **only for cookie-authenticated unsafe methods** — Bearer callers are exempt. `/auth/refresh`, `/auth/logout`, and `PUT /users/me` are cookie-and-CSRF only; the refresh cookie is scoped to `/api/v1`. Profile updates atomically rotate the current device session. Register/login use a Redis sliding-window limiter and fail closed when Redis is unavailable.
 
-`Secure(CookieSecure)` trusts `X-Forwarded-Proto` for HTTPS detection and 308-redirects plain HTTP, so a reverse proxy must set that header in production.
+`Secure(CookieSecure)` trusts `X-Forwarded-Proto` for HTTPS detection and 308-redirects plain HTTP, so a reverse proxy must set that header in production. `/healthz` and `/readyz` are registered **before** the `Secure` middleware, so they are always reachable over plain HTTP from inside the container (Compose healthchecks and deployment scripts rely on this); only `/api/v1` business routes are HTTPS-gated.
 
 ## Configuration
 

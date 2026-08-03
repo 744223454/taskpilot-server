@@ -143,6 +143,22 @@ POSTGRES_DB=taskpilot_dev \
 
 主账号包含进行中的项目、已归档项目、待确认解析结果、处理中的解析任务和失败样例；其余账号各自包含独立的文档、解析结果、项目和任务，用于验证用户数据隔离。脚本中的 PDF 路径仅用于数据库界面测试，不包含真实上传文件。
 
+### 为已有体验账号补充数据
+
+已有账号需要保留密码、资料和原有业务数据时，使用增量脚本，不要执行上面的全量开发种子脚本。增量脚本只接受已存在且启用的用户：主账号不存在、附加账号任一不存在或已停用时，整个事务都会回滚；脚本不会创建、更新或删除用户，也不会删除或覆盖已有文档、解析结果、项目和任务。
+
+```bash
+COMPOSE_PROJECT_NAME=taskpilot-dev-server \
+COMPOSE_FILE="$PWD/docker-compose.dev.yml" \
+ENV_FILE="$PWD/.env.dev" \
+POSTGRES_DB=taskpilot_dev \
+PRIMARY_EMAIL=seed.dev01@taskpilot.1kuansi.cn \
+ADDITIONAL_EMAILS=seed.dev02@taskpilot.1kuansi.cn,seed.dev03@taskpilot.1kuansi.cn \
+./scripts/supplement_experience_data.sh --confirm-additive
+```
+
+`PRIMARY_EMAIL` 默认是 `seed.dev01@taskpilot.1kuansi.cn`；`ADDITIONAL_EMAILS` 可省略，多个邮箱使用英文逗号分隔。每个目标账号会补充一个进行中项目、一个已归档项目和一条待确认解析结果。脚本通过固定的 `ai_model` 种子键判断数据是否已经存在，重复执行会跳过对应数据集，也不会覆盖用户后续对体验数据的修改。
+
 ## 反向代理示例
 
 反向代理需要把你选定的子域名转发到 `http://127.0.0.1:8888`。
