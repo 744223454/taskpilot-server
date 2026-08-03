@@ -18,6 +18,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8888/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
     networks:
       - taskpilot_net
 

@@ -19,6 +19,12 @@ func RegisterHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 			response.Error(c, http.StatusBadRequest, bizerrors.CodeBadRequest, err.Error())
 			return
 		}
+		retryAfter, err := enforceRegisterRateLimit(c.Request.Context(), svcCtx, c.ClientIP())
+		if err != nil {
+			setRetryAfterHeader(c, retryAfter)
+			writeAuthError(c, svcCtx, err)
+			return
+		}
 
 		resp, err := authlogic.NewService(c.Request.Context(), svcCtx).Register(&req)
 		if err != nil {

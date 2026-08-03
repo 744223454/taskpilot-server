@@ -55,6 +55,43 @@ end
 return 1
 `)
 
+var rotateRefreshSessionProfileScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then
+  return {0}
+end
+
+local expires_at = tonumber(redis.call("HGET", KEYS[1], "expires_at"))
+if not expires_at or expires_at <= tonumber(ARGV[6]) then
+  redis.call("DEL", KEYS[1])
+  return {0}
+end
+
+local current_hash = redis.call("HGET", KEYS[1], "token_hash")
+if not current_hash or current_hash ~= ARGV[1] then
+  redis.call("DEL", KEYS[1])
+  return {-1}
+end
+
+local session_user_id = redis.call("HGET", KEYS[1], "user_id")
+if not session_user_id or session_user_id ~= ARGV[3] then
+  return {-2}
+end
+
+redis.call("HSET", KEYS[1],
+  "token_hash", ARGV[2],
+  "nickname", ARGV[4],
+  "avatar_url", ARGV[5]
+)
+return {
+  1,
+  session_user_id,
+  redis.call("HGET", KEYS[1], "email"),
+  ARGV[4],
+  ARGV[5],
+  tostring(expires_at)
+}
+`)
+
 type RefreshSessionStore struct {
 	client *redis.Client
 }
@@ -139,6 +176,62 @@ func (s *RefreshSessionStore) Rotate(ctx context.Context, sessionID, currentHash
 	expiresAtUnix, err := redisInt64(result[5])
 	if err != nil {
 		return jwtauth.RefreshSession{}, fmt.Errorf("decode refresh session expiry: %w", err)
+	}
+	return jwtauth.RefreshSession{
+		ID:        sessionID,
+		UserID:    userID,
+		Email:     redisString(result[2]),
+		Nickname:  redisString(result[3]),
+		AvatarURL: optionalStringPointer(redisString(result[4])),
+		ExpiresAt: time.Unix(expiresAtUnix, 0).UTC(),
+	}, nil
+}
+
+func (s *RefreshSessionStore) RotateProfile(ctx context.Context, sessionID, currentHash, replacementHash string, userID int64, nickname string, avatarURL *string, now time.Time) (jwtauth.RefreshSession, error) {
+	if s == nil || s.client == nil {
+		return jwtauth.RefreshSession{}, errors.New("redis client is not configured")
+	}
+
+	result, err := rotateRefreshSessionProfileScript.Run(
+		ctx,
+		s.client,
+		[]string{refreshSessionKey(sessionID)},
+		currentHash,
+		replacementHash,
+		strconv.FormatInt(userID, 10),
+		nickname,
+		optionalString(avatarURL),
+		now.Unix(),
+	).Slice()
+	if err != nil {
+		return jwtauth.RefreshSession{}, fmt.Errorf("rotate refresh session profile: %w", err)
+	}
+	if len(result) == 0 {
+		return jwtauth.RefreshSession{}, jwtauth.ErrRefreshSessionNotFound
+	}
+
+	status, err := redisInt64(result[0])
+	if err != nil {
+		return jwtauth.RefreshSession{}, fmt.Errorf("decode refresh profile rotation status: %w", err)
+	}
+	switch status {
+	case 0:
+		return jwtauth.RefreshSession{}, jwtauth.ErrRefreshSessionNotFound
+	case -1:
+		return jwtauth.RefreshSession{}, jwtauth.ErrRefreshTokenReused
+	case -2:
+		return jwtauth.RefreshSession{}, jwtauth.ErrRefreshSessionNotFound
+	case 1:
+		if len(result) != 6 {
+			return jwtauth.RefreshSession{}, fmt.Errorf("decode refresh profile rotation result: unexpected field count %d", len(result))
+		}
+	default:
+		return jwtauth.RefreshSession{}, fmt.Errorf("decode refresh profile rotation status: unexpected value %d", status)
+	}
+
+	expiresAtUnix, err := redisInt64(result[5])
+	if err != nil {
+		return jwtauth.RefreshSession{}, fmt.Errorf("decode refresh profile session expiry: %w", err)
 	}
 	return jwtauth.RefreshSession{
 		ID:        sessionID,

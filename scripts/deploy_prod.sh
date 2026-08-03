@@ -54,8 +54,20 @@ else
 fi
 
 echo "applying incremental database migrations"
+$COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_users_email_normalized.sql"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_documents_soft_delete_parse_jobs_unique.sql"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_projects_parse_result_unique.sql"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U taskpilot -d taskpilot < "$ROOT_DIR/scripts/migrate_projects_tasks_version.sql"
 
 $COMPOSE up -d --build app worker
+
+attempts=0
+until $COMPOSE exec -T app wget -q -O /dev/null http://127.0.0.1:8888/readyz; do
+	attempts=$((attempts + 1))
+	if [ "$attempts" -ge 30 ]; then
+		echo "application did not become ready in time"
+		$COMPOSE logs app worker
+		exit 1
+	fi
+	sleep 2
+done

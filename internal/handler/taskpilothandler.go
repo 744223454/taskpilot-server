@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/744223454/taskpilot-server/internal/logic"
 	"github.com/744223454/taskpilot-server/internal/svc"
-	"github.com/744223454/taskpilot-server/internal/types"
 	bizerrors "github.com/744223454/taskpilot-server/pkg/errors"
 	"github.com/744223454/taskpilot-server/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -20,40 +18,40 @@ type healthResponse struct {
 	Worker bool   `json:"worker"`
 }
 
-func TaskpilotHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
+func HealthHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := &types.Request{
-			Name: c.Param("name"),
-		}
-
-		l := logic.NewTaskpilotLogic(c.Request.Context(), svcCtx)
-		resp, err := l.Taskpilot(req)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, bizerrors.CodeInternalError, err.Error())
-			return
-		}
-
-		response.Success(c, http.StatusOK, resp)
+		status := dependencyStatus(c.Request.Context(), svcCtx)
+		status.Status = "ok"
+		response.Success(c, http.StatusOK, status)
 	}
 }
 
-func HealthHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
+func ReadinessHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		redisReady := false
-		workerReady := false
-		if svcCtx.Redis != nil {
-			pingContext, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
-			defer cancel()
-			redisReady = svcCtx.Redis.Ping(pingContext).Err() == nil
-			if redisReady && svcCtx.ParseJobs != nil {
-				workerReady, _ = svcCtx.ParseJobs.WorkerHealthy(pingContext)
-			}
+		status := dependencyStatus(c.Request.Context(), svcCtx)
+		if status.DB && status.Redis && status.Worker {
+			status.Status = "ready"
+			response.Success(c, http.StatusOK, status)
+			return
 		}
-		response.Success(c, http.StatusOK, healthResponse{
-			Status: "ok",
-			DB:     svcCtx.DB != nil,
-			Redis:  redisReady,
-			Worker: workerReady,
-		})
+		response.Error(c, http.StatusServiceUnavailable, bizerrors.CodeServiceUnavailable, "service not ready")
 	}
+}
+
+func dependencyStatus(requestContext context.Context, svcCtx *svc.ServiceContext) healthResponse {
+	status := healthResponse{}
+	checkContext, cancel := context.WithTimeout(requestContext, 500*time.Millisecond)
+	defer cancel()
+	if svcCtx.DB != nil {
+		if sqlDB, err := svcCtx.DB.DB(); err == nil {
+			status.DB = sqlDB.PingContext(checkContext) == nil
+		}
+	}
+	if svcCtx.Redis != nil {
+		status.Redis = svcCtx.Redis.Ping(checkContext).Err() == nil
+		if status.Redis && svcCtx.ParseJobs != nil {
+			status.Worker, _ = svcCtx.ParseJobs.WorkerHealthy(checkContext)
+		}
+	}
+	return status
 }

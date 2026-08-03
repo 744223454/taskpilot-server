@@ -3,6 +3,11 @@ Host: 0.0.0.0
 Port: 8888
 Mode: release
 
+HTTP:
+  TrustedProxies:
+    - "127.0.0.1"
+    - "172.16.0.0/12"
+
 Database:
   DataSource: ""
 
@@ -16,6 +21,10 @@ Auth:
   AccessExpire: 900
   RefreshExpire: 2592000
   CookieSecure: true
+  LoginRateLimit: 10
+  LoginRateWindow: 300
+  RegisterRateLimit: 20
+  RegisterRateWindow: 3600
 
 CORS:
   AllowedOrigins:

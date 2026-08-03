@@ -114,3 +114,23 @@ func TestRequireCSRFForCookieAuth(t *testing.T) {
 		t.Fatalf("valid csrf status = %d, want %d", withCSRFResponse.Code, http.StatusNoContent)
 	}
 }
+
+func TestRequireCookieAccessRejectsBearer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := jwtauth.NewManager("test-secret", 3600)
+	token, err := manager.GenerateToken(jwtauth.Claims{UserID: 42})
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+	router := gin.New()
+	router.Use(RequireAuth(&svc.ServiceContext{JWT: manager}), RequireCookieAccess())
+	router.PUT("/profile", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	request := httptest.NewRequest(http.MethodPut, "/profile", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer profile update status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}

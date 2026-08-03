@@ -26,6 +26,7 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodGet, path: "/api/v1/users/me"},
+		{method: http.MethodPut, path: "/api/v1/users/me"},
 		{method: http.MethodGet, path: "/api/v1/documents"},
 		{method: http.MethodPost, path: "/api/v1/documents/pdf"},
 		{method: http.MethodGet, path: "/api/v1/parse-jobs/1/result"},
@@ -46,6 +47,20 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("%s %s status = %d, want %d", testCase.method, testCase.path, response.Code, http.StatusUnauthorized)
 		}
+	}
+}
+
+func TestExampleRouteIsNotRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterRoutes(router, &svc.ServiceContext{})
+
+	request := httptest.NewRequest(http.MethodGet, "/from/taskpilot", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("GET /from/taskpilot status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
 
