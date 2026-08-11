@@ -28,7 +28,6 @@ Auth:
 
 CORS:
   AllowedOrigins:
-    - "https://dev.taskpilot.1kuansi.cn"
     - "https://taskpilot.1kuansi.cn"
 
 AI:

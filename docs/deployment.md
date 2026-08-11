@@ -1,8 +1,10 @@
 # TaskPilot 部署指南
 
-## 部署模式
+## 当前唯一部署模式
 
-当前仓库已经按“单台云服务器 + Docker Compose”方式准备好部署：
+后端只维护一个远程运行环境：原 `dev` 分支重命名为新的 `main`，原开发服务器继续作为唯一服务器。公网统一使用 `https://taskpilot.1kuansi.cn`，前端静态文件和后端 `/api/` 由同一个 Nginx 站点提供。
+
+服务器仍按“单台云服务器 + Docker Compose”运行：
 
 - `app`：Go API 服务
 - `worker`：独立解析进程，消费 Redis Streams 并调用 AI
@@ -20,7 +22,7 @@ API 与 Worker 共享 `taskpilot_uploads:/app/uploads` 持久化卷。API 在上
 - 一个部署目录，例如 `/srv/taskpilot-server`
 - 防火墙仅放行 `22`、`80`、`443`
 
-## 首次部署
+## 新服务器首次部署
 
 1. 在服务器上克隆仓库。
 2. 将 `.env.prod.example` 复制为 `.env.prod`。
@@ -42,9 +44,9 @@ chmod +x scripts/deploy_prod.sh
 
 `scripts/migrate_projects_tasks_version.sql` 幂等增加 `projects.version`、`tasks.version`、版本 CHECK 约束，以及项目列表和任务排序索引；开发和生产部署脚本会自动执行。
 
-## 生产配置模型
+## 配置模型
 
-`etc/taskpilot-api.prod.yaml` 负责保存“已提交到仓库的配置结构模板”；真正的敏感值通过 `.env.prod` 中的环境变量覆盖注入：
+新建独立环境可以使用 `deploy_prod.sh` 初始化完整 Compose；当前从原开发服务器迁移而来的唯一环境继续使用服务器私有的 `.env.dev`、`.env.worker.dev`、`etc/taskpilot-api.dev.yaml` 与 `docker-compose.dev.yml`。真正的敏感值必须留在服务器，不提交 Git。
 
 - `TASKPILOT_DATABASE_DSN`
 - `TASKPILOT_REDIS_HOST`
@@ -58,9 +60,9 @@ chmod +x scripts/deploy_prod.sh
 - `TASKPILOT_AUTH_REGISTER_RATE_LIMIT` / `TASKPILOT_AUTH_REGISTER_RATE_WINDOW`
 - `POSTGRES_PASSWORD`
 
-PDF 上传配置可保留在 YAML，也可通过 `.env.prod` 的 `TASKPILOT_UPLOAD_*` 覆盖。生产环境至少应确保 `TASKPILOT_UPLOAD_ROOT=/app/uploads`；默认限制为 10 MiB、50 页、50,000 字符、15 秒提取超时和 2 个并发提取进程。
+PDF 上传配置可保留在 YAML，也可通过环境变量覆盖。远程环境至少应确保 `TASKPILOT_UPLOAD_ROOT=/app/uploads`；默认限制为 10 MiB、50 页、50,000 字符、15 秒提取超时和 2 个并发提取进程。
 
-Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
+Worker 专属敏感配置放在不提交的 `.env.worker.dev`：
 
 - `TASKPILOT_AI_API_KEY`
 - `TASKPILOT_AI_BASE_URL`，默认 `https://ai.soruxgpt.com/v1`
@@ -70,46 +72,31 @@ Worker 专属敏感配置放在不提交的 `.env.worker.prod`：
 
 Worker 的队列、租约、恢复、心跳和停止参数默认放在 YAML 中，也可通过 `TASKPILOT_WORKER_*` 环境变量覆盖；完整清单以 `internal/config/config.go` 和工作区根目录 `docs/development.md` 为准。环境变量数值无法解析时当前实现会回退 YAML 值，发布后应通过日志、`/healthz` 与 `/readyz` 核对运行状态。
 
-生产镜像已安装 `poppler-utils`。PDF 原文件保存在共享卷中，不暴露下载接口；文档软删除后 API 尝试立即删除文件，失败时由 Worker 孤儿扫描最终清理。数据库引用查询失败时 Worker 不会删除任何文件。
+应用镜像已安装 `poppler-utils`。PDF 原文件保存在共享卷中，不暴露下载接口；文档软删除后 API 尝试立即删除文件，失败时由 Worker 孤儿扫描最终清理。数据库引用查询失败时 Worker 不会删除任何文件。
 
 这样做的好处是：既能让应用保持稳定的 YAML 配置结构，又能避免把生产密钥直接提交到 Git。
 
-## 日常发布流程
+## 自动与手动发布
 
-如果你是在服务器上手动发布，可以执行：
+`.github/workflows/ci-deploy.yml` 只监听新的 `main`：测试、PostgreSQL 集成测试、构建和进程冒烟全部通过后，才会部署唯一服务器。不再维护第二套生产/开发分支部署。
 
-```bash
-git pull --ff-only
-./scripts/deploy_prod.sh
-```
-
-`.github/workflows/ci-deploy.yml` 支持按分支自动部署：
-
-- `main` 更新并通过测试后，部署生产服务器。
-- `dev` 更新并通过测试后，部署开发服务器。
-
-首次启用开发环境自动部署时，需要先将工作流和 `scripts/deploy_dev.sh` 同步到 `dev` 分支。GitHub 只会执行当前被推送分支中已经存在的工作流。
-
-在仓库 Secrets 中补齐以下变量：
+GitHub Actions Secrets：
 
 - `DEPLOY_HOST`
 - `DEPLOY_PORT`
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
-- `DEPLOY_PATH`：生产服务器仓库目录。
-- `DEV_DEPLOY_PATH`：开发服务器仓库目录，例如 `/www/wwwroot/dev.taskpilot.1kuansi.cn/taskpilot-dev-server`。
+- `DEV_DEPLOY_PATH`：唯一服务器上的后端仓库绝对路径，例如 `/srv/taskpilot-server`
 
-如果两个环境位于同一台服务器，可以共用主机、端口、用户和 SSH 密钥，只分别配置两个部署目录。
-
-开发服务器需在部署目录中准备不提交到 Git 的 `.env.dev`、`.env.worker.dev` 和 `etc/taskpilot-api.dev.yaml`。`.env.worker.dev` 可从 `.env.worker.dev.example` 复制后填入开发环境 AI Key。工作流会在服务器执行：
+服务器仓库必须检出新的 `main`，并保留不提交的 `.env.dev`、`.env.worker.dev`、`etc/taskpilot-api.dev.yaml` 与 `docker-compose.dev.yml`。工作流实际执行：
 
 ```bash
-git switch dev
-git pull --ff-only origin dev
+git switch main
+git pull --ff-only origin main
 sh ./scripts/deploy_dev.sh
 ```
 
-开发部署脚本使用服务器已有且不提交的 `docker-compose.dev.yml`，叠加仓库内的 `docker-compose.dev.worker.yml`，重新构建共享镜像并启动开发 `app`、`worker` 与 `redis` 容器，不会在开发 Compose 中创建 PostgreSQL。开发应用通过外部 `taskpilot_prod_net` 复用生产环境的 `taskpilot-postgres` 容器，但必须连接独立的 `taskpilot_dev` 数据库；脚本会通过该容器自动执行邮箱规范化及其他增量迁移，然后等待 `/readyz` 通过。
+`deploy_dev.sh` 使用服务器已有且不提交的 `docker-compose.dev.yml`，叠加仓库内的 `docker-compose.dev.worker.yml`，重新构建共享镜像并启动 `app`、`worker` 与 `redis`。脚本通过 `taskpilot-postgres` 容器访问 `taskpilot_dev` 数据库，执行所有增量迁移，再等待 `/readyz` 通过。虽然文件名保留 `dev` 以避免高风险重命名，但它现在代表唯一远程环境。
 
 脚本默认使用以下值，必要时可在执行脚本前覆盖：
 
@@ -117,15 +104,66 @@ sh ./scripts/deploy_dev.sh
 - `POSTGRES_USER=taskpilot`
 - `POSTGRES_DB=taskpilot_dev`
 
-禁止将开发环境的 `POSTGRES_DB` 设置为生产数据库 `taskpilot`。
+不要为了改名修改 `POSTGRES_DB`；保留 `taskpilot_dev` 可以避免无必要的数据搬迁。数据库名不会暴露给用户。
 
-部署脚本将开发环境的 Docker Compose 项目名固定为 `taskpilot-dev-server`，避免与同一 Docker 主机上的生产项目混用。首次迁移时，如果新项目尚未完整拥有 `app` 和 `redis` 服务，脚本会自动删除名称包含 `taskpilot-dev-` 的旧开发容器以及失败重建遗留的临时容器，再由新项目重新创建；新项目完整建立后，后续部署不会重复清理正常容器。命名卷不会被删除，开发数据会保留。
+部署脚本仍将 Docker Compose 项目名固定为 `taskpilot-dev-server`。不要仅为改名重建 Compose 项目或命名卷，否则容易误建空库或丢失上传文件挂载；这些内部名称不影响公网品牌和域名。
 
 如果 `docker-compose.dev.yml` 继续复用旧项目创建的命名卷，应将这些卷声明为 `external: true`，避免 Docker Compose 输出归属警告。
 
 Worker 应用内部最多等待 180 秒完成在途解析；Compose 为 Worker 保留 190 秒停止宽限期。`GET /healthz` 始终用于存活检查并展示依赖状态；`GET /readyz` 只有在数据库、Redis 与 Worker 心跳全部正常时返回 `200`，Worker 停止后最多约 30 秒变为未就绪。
 
-注册/登录限流依赖真实客户端 IP。应用默认不信任代理头；生产必须通过 `TASKPILOT_HTTP_TRUSTED_PROXIES` 明确配置 Nginx/网关地址或网段，并由代理正确设置 `X-Forwarded-For`。不要配置不受控的公网网段。
+注册/登录限流依赖真实客户端 IP。远程环境必须通过 `TASKPILOT_HTTP_TRUSTED_PROXIES` 明确配置 Nginx/网关地址或网段，并由代理正确设置 `X-Forwarded-For`。不要配置不受控的公网网段。
+
+## 从双服务器迁移到唯一服务器
+
+目标是保留原开发服务器、原 `taskpilot_dev` 数据库及上传卷，将它们作为唯一线上数据；原生产服务器只在验证完成后下线。不要直接删除旧生产服务器。
+
+1. 在 DNS 服务商将 `taskpilot.1kuansi.cn` 的 TTL 临时降到 `300` 秒；记录当前生产和开发服务器 IP。
+2. 备份两台服务器。至少导出旧生产库、保留旧生产上传卷，并在保留服务器导出 `taskpilot_dev`：
+
+   ```bash
+   docker exec taskpilot-postgres pg_dump -U taskpilot -Fc taskpilot_dev > taskpilot_dev-before-cutover.dump
+   docker run --rm -v taskpilot-dev-server_taskpilot_uploads:/source:ro -v "$PWD:/backup" alpine \
+     tar -czf /backup/taskpilot-uploads-before-cutover.tar.gz -C /source .
+   ```
+
+   上传卷实际名称先用 `docker volume ls | grep taskpilot` 确认，不要猜测后执行删除命令。
+3. 在保留服务器修改私有 `.env.dev`：设置 `TASKPILOT_AUTH_COOKIE_SECURE=true`、`TASKPILOT_CORS_ALLOWED_ORIGINS=https://taskpilot.1kuansi.cn`，核对 `TASKPILOT_DATABASE_DSN` 仍指向 `taskpilot_dev`，并保留原 JWT 密钥、数据库密码和 Redis 配置。
+4. 在 `etc/taskpilot-api.dev.yaml` 中只保留线上 CORS Origin `https://taskpilot.1kuansi.cn`；环境变量非空时会覆盖 YAML。
+5. 保持服务器私有 `docker-compose.dev.yml` 的容器、网络和卷映射不变，只确认 `app` 继续绑定 `127.0.0.1:8888:8888`，PostgreSQL/Redis 不暴露公网。
+6. 为 `taskpilot.1kuansi.cn` 配置 Nginx：`/` 指向前端 `/srv/taskpilot-web/current`，`/api/` 代理到 `http://127.0.0.1:8888`。完整示例见前端仓库 `deploy/nginx.taskpilot.conf`。
+7. 将 DNS 的 `taskpilot.1kuansi.cn` A/AAAA 记录切到保留服务器，签发或迁移该域名证书，然后执行 `nginx -t && systemctl reload nginx`。
+8. 在保留服务器执行一次 `sh ./scripts/deploy_dev.sh`，验证 `https://taskpilot.1kuansi.cn/healthz`、`/readyz`、注册登录、PDF 上传和 AI 解析。
+9. 先将原远端 `main` 重命名为 `archive/main-before-dev-cutover`，再将 `dev` 重命名为新的 `main`；将默认分支和分支保护规则指向新 `main`。Actions Secrets 保持不变，只删除不再使用的 `DEPLOY_PATH`。
+10. 按下面的“服务器首次切换分支”执行一次分支迁移，随后推送或手动触发 Actions，确认新的 `main` 可以自动部署。
+11. 至少观察 24–72 小时并确认备份可恢复，再停止和释放旧生产服务器；确认不再需要旧代码分支后，可以删除 `archive/main-before-dev-cutover`，但建议永久保留同名 Git Tag。
+
+### 服务器首次切换分支
+
+GitHub 完成分支重命名后，在当前绑定 `dev` 的服务器仓库执行：
+
+```bash
+cd /srv/taskpilot-server
+git status --short
+git fetch origin --prune
+git switch dev
+git branch -m dev main
+git branch --set-upstream-to=origin/main main
+git pull --ff-only origin main
+sh ./scripts/deploy_dev.sh
+```
+
+如果 `git branch -m dev main` 提示服务器本地已经存在旧 `main`，先保留它再重试：
+
+```bash
+git branch -m main archive-main-before-dev-cutover-local
+git branch -m dev main
+git branch --set-upstream-to=origin/main main
+```
+
+执行前 `git status --short` 必须没有未知的已跟踪文件修改；服务器私有且被 Git 忽略的 `.env.dev`、`.env.worker.dev`、`etc/taskpilot-api.dev.yaml` 和 `docker-compose.dev.yml` 不受分支重命名影响。
+
+旧 `https://dev.taskpilot.1kuansi.cn` 建议保留 7–14 天并做 `308` 跳转到新域名。由于认证 Cookie 是 host-only，用户切换域名后需要重新登录一次，这是预期行为。
 
 ## 开发服务器测试数据
 
