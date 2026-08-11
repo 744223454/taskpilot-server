@@ -101,7 +101,7 @@ Production splits secrets: `.env.prod` for app/database/auth, `.env.worker.prod`
 
 ## Deployment
 
-Single server, Docker Compose. `app` binds `127.0.0.1:8888` behind a reverse proxy; `postgres` and `redis` stay on the internal network. `scripts/deploy_prod.sh` (and `deploy_dev.sh`) validate the AI key, wait for PostgreSQL, run migrations, rebuild the shared image, roll both containers, and wait for strict `/readyz`. GitHub Actions runs unit tests, PostgreSQL integration tests, and a real API/Worker process smoke test before deploying `main` → production or `dev` → development. Details in `docs/deployment.md`.
+Single remote server, Docker Compose. `app` binds `127.0.0.1:8888` behind a reverse proxy; `postgres` and `redis` stay on the internal network. The retained `scripts/deploy_dev.sh` validates the AI key, waits for PostgreSQL, runs migrations, rebuilds the shared image, rolls both containers, and waits for strict `/readyz`. GitHub Actions runs unit tests, PostgreSQL integration tests, and a real API/Worker process smoke test before deploying the renamed `main` branch to the only remote environment. Details in `docs/deployment.md`.
 
 The dev environment reuses the production `taskpilot-postgres` container over an external network but **must** point at the separate `taskpilot_dev` database.
 

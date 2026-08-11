@@ -274,13 +274,12 @@ func applyWorkerDefaults(cfg *Config) error {
 }
 
 // defaultCORSOrigins returns the frontend origins allowed to call the API.
-// Dev runs on the Vite dev server (localhost:5173/5174); production and the
-// deployed API share the 1kuansi.cn domains.
+// Local development runs on Vite (localhost:5173/5174); the deployed frontend
+// and API share the canonical taskpilot.1kuansi.cn origin.
 func defaultCORSOrigins() []string {
 	return []string{
 		"http://localhost:5173",
 		"http://localhost:5174",
-		"https://dev.taskpilot.1kuansi.cn",
 		"https://taskpilot.1kuansi.cn",
 	}
 }
