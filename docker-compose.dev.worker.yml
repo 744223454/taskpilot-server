@@ -1,6 +1,9 @@
 services:
   app:
     image: taskpilot-server:dev
+    env_file:
+      - .env.dev
+      - ${TASKPILOT_WORKER_ENV_FILE:-.env.worker.dev}
 
   worker:
     image: taskpilot-server:dev

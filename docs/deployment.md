@@ -13,7 +13,7 @@
 
 API 与 Worker 共享 `taskpilot_uploads:/app/uploads` 持久化卷。API 在上传请求中同步调用 Poppler 提取 PDF 文字，Worker 在启动时及每 24 小时扫描临时文件和正式孤儿文件。
 
-应用在宿主机监听 `127.0.0.1:8888`。公网流量建议通过 Nginx 或 Caddy 之类的反向代理转发到该地址。
+独立 Compose 生产栈的应用在宿主机监听 `127.0.0.1:8888`；当前保留的开发栈通过私有 Compose 映射为 `127.0.0.1:8889`。本服务器的 Nginx 应继续代理到 `http://127.0.0.1:8889`，不要改动开发部署配置。公网流量通过 Nginx 或 Caddy 转发到该地址。
 
 ## 服务器前置条件
 
@@ -62,13 +62,18 @@ chmod +x scripts/deploy_prod.sh
 
 PDF 上传配置可保留在 YAML，也可通过环境变量覆盖。远程环境至少应确保 `TASKPILOT_UPLOAD_ROOT=/app/uploads`；默认限制为 10 MiB、50 页、50,000 字符、15 秒提取超时和 2 个并发提取进程。
 
-Worker 专属敏感配置放在不提交的 `.env.worker.dev`：
+Worker 与 API 流式答疑共享的 AI 敏感配置放在不提交的 `.env.worker.dev`；开发 Compose override 会将该文件同时注入 `app` 和 `worker`：
 
 - `TASKPILOT_AI_API_KEY`
 - `TASKPILOT_AI_BASE_URL`，默认 `https://ai.soruxgpt.com/v1`
 - `TASKPILOT_AI_MODEL`，默认 `gpt-5.4`
 - `TASKPILOT_AI_REQUEST_TIMEOUT`，默认整次解析 `180` 秒
 - `TASKPILOT_AI_MAX_OUTPUT_TOKENS`，默认 `8000`
+- `TASKPILOT_AI_CHAT_REQUEST_TIMEOUT`，默认单次答疑 `90` 秒
+- `TASKPILOT_AI_CHAT_MAX_OUTPUT_TOKENS`，默认 `2000`
+- `TASKPILOT_AI_CHAT_RATE_LIMIT` / `TASKPILOT_AI_CHAT_RATE_WINDOW`，默认每用户 `10` 次 / `300` 秒
+
+API 没有 AI Key 时仍可启动且不会影响 `/readyz`，只有 `/api/v1/ai/chat` 返回 `503`。生产 Nginx 必须为该路由关闭代理缓冲并将读写超时设置为大于 90 秒，否则浏览器无法稳定增量接收 SSE。
 
 Worker 的队列、租约、恢复、心跳和停止参数默认放在 YAML 中，也可通过 `TASKPILOT_WORKER_*` 环境变量覆盖；完整清单以 `internal/config/config.go` 和工作区根目录 `docs/development.md` 为准。环境变量数值无法解析时当前实现会回退 YAML 值，发布后应通过日志、`/healthz` 与 `/readyz` 核对运行状态。
 
@@ -130,8 +135,8 @@ Worker 应用内部最多等待 180 秒完成在途解析；Compose 为 Worker �
    上传卷实际名称先用 `docker volume ls | grep taskpilot` 确认，不要猜测后执行删除命令。
 3. 在保留服务器修改私有 `.env.dev`：设置 `TASKPILOT_AUTH_COOKIE_SECURE=true`、`TASKPILOT_CORS_ALLOWED_ORIGINS=https://taskpilot.1kuansi.cn`，核对 `TASKPILOT_DATABASE_DSN` 仍指向 `taskpilot_dev`，并保留原 JWT 密钥、数据库密码和 Redis 配置。
 4. 在 `etc/taskpilot-api.dev.yaml` 中只保留线上 CORS Origin `https://taskpilot.1kuansi.cn`；环境变量非空时会覆盖 YAML。
-5. 保持服务器私有 `docker-compose.dev.yml` 的容器、网络和卷映射不变，只确认 `app` 继续绑定 `127.0.0.1:8888:8888`，PostgreSQL/Redis 不暴露公网。
-6. 为 `taskpilot.1kuansi.cn` 配置 Nginx：`/` 指向前端 `/srv/taskpilot-web/current`，`/api/` 代理到 `http://127.0.0.1:8888`。完整示例见前端仓库 `deploy/nginx.taskpilot.conf`。
+5. 保持服务器私有 `docker-compose.dev.yml` 的容器、网络和卷映射不变；当前开发 `app` 继续绑定 `127.0.0.1:8889:8888`，PostgreSQL/Redis 不暴露公网。
+6. 为 `taskpilot.1kuansi.cn` 配置 Nginx：`/` 指向前端 `/srv/taskpilot-web/current`，`/api/` 代理到 `http://127.0.0.1:8889`。完整示例见前端仓库 `deploy/nginx.taskpilot.conf`。
 7. 将 DNS 的 `taskpilot.1kuansi.cn` A/AAAA 记录切到保留服务器，签发或迁移该域名证书，然后执行 `nginx -t && systemctl reload nginx`。
 8. 在保留服务器执行一次 `sh ./scripts/deploy_dev.sh`，验证 `https://taskpilot.1kuansi.cn/healthz`、`/readyz`、注册登录、PDF 上传和 AI 解析。
 9. 先将原远端 `main` 重命名为 `archive/main-before-dev-cutover`，再将 `dev` 重命名为新的 `main`；将默认分支和分支保护规则指向新 `main`。Actions Secrets 保持不变，只删除不再使用的 `DEPLOY_PATH`。

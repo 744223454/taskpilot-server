@@ -36,6 +36,10 @@ AI:
   Model: "gpt-5.4"
   RequestTimeout: 180
   MaxOutputTokens: 8000
+  ChatRequestTimeout: 90
+  ChatMaxOutputTokens: 2000
+  ChatRateLimit: 10
+  ChatRateWindow: 300
 
 Upload:
   Root: "uploads"

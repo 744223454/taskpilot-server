@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TaskPilot Server API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     TaskPilot 当前已实现接口的 OpenAPI 规范。
 
@@ -28,6 +28,8 @@ tags:
     description: 解析任务创建与状态查询
   - name: ParseResults
     description: AI 解析结果查询、编辑与确认
+  - name: AIChat
+    description: 基于解析结果上下文的流式只读答疑
   - name: Projects
     description: 项目创建、查询、编辑和状态管理
   - name: Tasks
@@ -85,6 +87,82 @@ paths:
                       worker: true
         "503":
           description: 至少一个核心依赖未就绪
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/ai/chat:
+    post:
+      tags:
+        - AIChat
+      summary: 解析结果流式答疑
+      description: |
+        根据当前用户拥有的解析结果、截断原文和最近对话生成只读回答。
+        成功响应使用 SSE `meta`、`delta`、`done`、`error` 事件；每 15 秒可能发送注释心跳。
+        每用户 5 分钟最多 10 次请求，且同时只允许一个生成请求。
+      operationId: postAIChat
+      security:
+        - bearerAuth: []
+        - accessCookie: []
+      parameters:
+        - name: X-Request-ID
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIChatRequest"
+      responses:
+        "200":
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |-
+                event: meta
+                data: {"request_id":"550e8400-e29b-41d4-a716-446655440000","model":"gpt-5.4"}
+
+                event: delta
+                data: {"content":"建议先确认截止时间。"}
+
+                event: done
+                data: {"finish_reason":"completed"}
+        "400":
+          description: 请求 ID、消息顺序或长度不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Access Token 无效或缺失
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 解析结果不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: 超过频率限制或已有生成请求
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Redis、数据库或 AI Chat Client 不可用
           content:
             application/json:
               schema:
@@ -2232,6 +2310,31 @@ components:
       in: cookie
       name: refresh_token
   schemas:
+    AIChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          minLength: 1
+    AIChatRequest:
+      type: object
+      required: [parse_result_id, messages]
+      properties:
+        parse_result_id:
+          type: integer
+          format: int64
+          minimum: 1
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: 必须从 user 开始交替排列，并以 user 结束。
+          items:
+            $ref: "#/components/schemas/AIChatMessage"
     Envelope:
       type: object
       required:

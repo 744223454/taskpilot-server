@@ -14,4 +14,5 @@ var (
 	ErrPDFUnprocessable    = errors.New("PDF cannot be processed")
 	ErrExtractionBusy      = errors.New("PDF extraction service is busy")
 	ErrRateLimited         = errors.New("too many requests")
+	ErrAIUnavailable       = errors.New("AI assistant unavailable")
 )

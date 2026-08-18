@@ -3,6 +3,7 @@ package handler
 import (
 	"time"
 
+	aichathandler "github.com/744223454/taskpilot-server/internal/handler/aichat"
 	authhandler "github.com/744223454/taskpilot-server/internal/handler/auth"
 	dashboardhandler "github.com/744223454/taskpilot-server/internal/handler/dashboard"
 	documenthandler "github.com/744223454/taskpilot-server/internal/handler/document"
@@ -21,7 +22,6 @@ const requestTimeout = 30 * time.Second
 // RegisterRoutes wires all HTTP endpoints onto the Gin engine.
 func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 	router.Use(middleware.CORS(serverCtx.Config.CORS.AllowedOrigins))
-	router.Use(middleware.Timeout(requestTimeout))
 
 	router.GET("/healthz", HealthHandler(serverCtx))
 	router.GET("/readyz", ReadinessHandler(serverCtx))
@@ -30,6 +30,12 @@ func RegisterRoutes(router *gin.Engine, serverCtx *svc.ServiceContext) {
 
 	api := router.Group("/api/v1")
 	api.Use(middleware.NoCache())
+	chat := api.Group("")
+	chat.Use(middleware.RequireAuth(serverCtx))
+	chat.Use(middleware.RequireCSRFForCookieAuth())
+	chat.POST("/ai/chat", middleware.LimitRequestBody(aichathandler.MaxRequestBodyBytes), aichathandler.ChatHandler(serverCtx))
+
+	api.Use(middleware.Timeout(requestTimeout))
 	api.POST("/auth/register", authhandler.RegisterHandler(serverCtx))
 	api.POST("/auth/login", authhandler.LoginHandler(serverCtx))
 	api.POST("/auth/refresh", middleware.RequireCookieCSRF(jwtauth.RefreshCookieName), authhandler.RefreshHandler(serverCtx))

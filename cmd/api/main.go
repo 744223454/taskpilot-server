@@ -14,6 +14,7 @@ import (
 	"github.com/744223454/taskpilot-server/internal/config"
 	"github.com/744223454/taskpilot-server/internal/handler"
 	"github.com/744223454/taskpilot-server/internal/svc"
+	"github.com/744223454/taskpilot-server/pkg/ai"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,7 +23,7 @@ var configFile = flag.String("f", "etc/taskpilot-api.yaml", "the config file")
 const (
 	readHeaderTimeout = 5 * time.Second
 	readTimeout       = 15 * time.Second
-	writeTimeout      = 35 * time.Second
+	writeTimeout      = 0
 	idleTimeout       = 60 * time.Second
 	shutdownTimeout   = 10 * time.Second
 )
@@ -49,6 +50,22 @@ func run() (runErr error) {
 	}
 
 	serverContext := svc.NewServiceContext(c)
+	if c.AI.APIKey != "" {
+		chatClient, chatErr := ai.NewResponsesChatClient(
+			c.AI.BaseURL,
+			c.AI.APIKey,
+			c.AI.Model,
+			time.Duration(c.AI.ChatRequestTimeout)*time.Second,
+			c.AI.ChatMaxOutputTokens,
+		)
+		if chatErr != nil {
+			serverContext.Logger.Warn("AI chat initialization failed", "error", chatErr)
+		} else {
+			serverContext.Chat = chatClient
+		}
+	} else {
+		serverContext.Logger.Warn("AI chat initialization skipped", "error", "config AI.APIKey is empty")
+	}
 	defer func() {
 		if err := serverContext.Close(); err != nil {
 			runErr = errors.Join(runErr, err)

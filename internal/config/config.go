@@ -49,11 +49,15 @@ type Config struct {
 	} `yaml:"CORS"`
 
 	AI struct {
-		BaseURL         string `yaml:"BaseURL"`
-		APIKey          string `yaml:"APIKey"`
-		Model           string `yaml:"Model"`
-		RequestTimeout  int64  `yaml:"RequestTimeout"`
-		MaxOutputTokens int64  `yaml:"MaxOutputTokens"`
+		BaseURL             string `yaml:"BaseURL"`
+		APIKey              string `yaml:"APIKey"`
+		Model               string `yaml:"Model"`
+		RequestTimeout      int64  `yaml:"RequestTimeout"`
+		MaxOutputTokens     int64  `yaml:"MaxOutputTokens"`
+		ChatRequestTimeout  int64  `yaml:"ChatRequestTimeout"`
+		ChatMaxOutputTokens int64  `yaml:"ChatMaxOutputTokens"`
+		ChatRateLimit       int64  `yaml:"ChatRateLimit"`
+		ChatRateWindow      int64  `yaml:"ChatRateWindow"`
 	} `yaml:"AI"`
 
 	Upload struct {
@@ -148,6 +152,21 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.AI.MaxOutputTokens < 0 {
 		return cfg, fmt.Errorf("config AI.MaxOutputTokens must not be negative")
+	}
+	if cfg.AI.ChatRequestTimeout == 0 {
+		cfg.AI.ChatRequestTimeout = 90
+	}
+	if cfg.AI.ChatMaxOutputTokens == 0 {
+		cfg.AI.ChatMaxOutputTokens = 2000
+	}
+	if cfg.AI.ChatRateLimit == 0 {
+		cfg.AI.ChatRateLimit = 10
+	}
+	if cfg.AI.ChatRateWindow == 0 {
+		cfg.AI.ChatRateWindow = 5 * 60
+	}
+	if cfg.AI.ChatRequestTimeout < 1 || cfg.AI.ChatMaxOutputTokens < 1 || cfg.AI.ChatRateLimit < 1 || cfg.AI.ChatRateWindow < 1 {
+		return cfg, fmt.Errorf("config AI chat limits must be positive")
 	}
 	if err := applyUploadDefaults(&cfg); err != nil {
 		return cfg, err
@@ -313,6 +332,10 @@ func applyEnvOverrides(cfg *Config) {
 	cfg.AI.Model = envString("TASKPILOT_AI_MODEL", cfg.AI.Model)
 	cfg.AI.RequestTimeout = envInt64("TASKPILOT_AI_REQUEST_TIMEOUT", cfg.AI.RequestTimeout)
 	cfg.AI.MaxOutputTokens = envInt64("TASKPILOT_AI_MAX_OUTPUT_TOKENS", cfg.AI.MaxOutputTokens)
+	cfg.AI.ChatRequestTimeout = envInt64("TASKPILOT_AI_CHAT_REQUEST_TIMEOUT", cfg.AI.ChatRequestTimeout)
+	cfg.AI.ChatMaxOutputTokens = envInt64("TASKPILOT_AI_CHAT_MAX_OUTPUT_TOKENS", cfg.AI.ChatMaxOutputTokens)
+	cfg.AI.ChatRateLimit = envInt64("TASKPILOT_AI_CHAT_RATE_LIMIT", cfg.AI.ChatRateLimit)
+	cfg.AI.ChatRateWindow = envInt64("TASKPILOT_AI_CHAT_RATE_WINDOW", cfg.AI.ChatRateWindow)
 
 	cfg.Upload.Root = envString("TASKPILOT_UPLOAD_ROOT", cfg.Upload.Root)
 	cfg.Upload.MaxFileBytes = envInt64("TASKPILOT_UPLOAD_MAX_FILE_BYTES", cfg.Upload.MaxFileBytes)
