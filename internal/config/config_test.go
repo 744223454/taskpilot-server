@@ -25,6 +25,9 @@ func TestLoadAppliesUploadDefaults(t *testing.T) {
 	if configuration.Auth.LoginRateLimit != 10 || configuration.Auth.LoginRateWindow != 300 || configuration.Auth.RegisterRateLimit != 20 || configuration.Auth.RegisterRateWindow != 3600 {
 		t.Fatalf("auth rate limit defaults = %#v", configuration.Auth)
 	}
+	if configuration.AI.ChatRequestTimeout != 90 || configuration.AI.ChatMaxOutputTokens != 2000 || configuration.AI.ChatRateLimit != 10 || configuration.AI.ChatRateWindow != 300 {
+		t.Fatalf("AI chat defaults = %#v", configuration.AI)
+	}
 }
 
 func TestLoadRejectsInvalidAuthRateLimit(t *testing.T) {

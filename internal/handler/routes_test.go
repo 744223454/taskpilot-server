@@ -29,6 +29,7 @@ func TestProtectedRoutesRequireAccessToken(t *testing.T) {
 		{method: http.MethodPut, path: "/api/v1/users/me"},
 		{method: http.MethodGet, path: "/api/v1/dashboard/stats"},
 		{method: http.MethodGet, path: "/api/v1/dashboard/reminders"},
+		{method: http.MethodPost, path: "/api/v1/ai/chat"},
 		{method: http.MethodGet, path: "/api/v1/documents"},
 		{method: http.MethodPost, path: "/api/v1/documents/pdf"},
 		{method: http.MethodGet, path: "/api/v1/parse-jobs/1/result"},

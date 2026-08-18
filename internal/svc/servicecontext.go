@@ -25,8 +25,10 @@ type ServiceContext struct {
 	Redis           *redis.Client
 	RefreshSessions jwtauth.RefreshSessionStore
 	AuthRateLimiter cachepkg.AuthRateLimiter
+	AIChatGuard     cachepkg.AIChatGuard
 	ParseJobs       cachepkg.ParseJobQueue
 	Parser          ai.Parser
+	Chat            ai.ChatStreamer
 	Files           upload.FileStore
 	PDFExtractor    upload.PDFExtractor
 	Logger          *slog.Logger
@@ -73,6 +75,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	serverContext.Redis = redisClient
 	serverContext.RefreshSessions = cachepkg.NewRefreshSessionStore(redisClient)
 	serverContext.AuthRateLimiter = cachepkg.NewAuthRateLimiter(redisClient)
+	serverContext.AIChatGuard = cachepkg.NewAIChatGuard(redisClient)
 	serverContext.ParseJobs = cachepkg.NewParseJobQueue(redisClient, c.Worker.StreamKey, c.Worker.ConsumerGroup)
 	pingContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

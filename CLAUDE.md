@@ -37,7 +37,7 @@ Migrations are plain SQL under `scripts/`, applied via `docker compose exec post
 
 Two binaries share one config file, one `ServiceContext`, and one Docker image; they differ only in entrypoint.
 
-- `cmd/api` — Gin HTTP server. Explicit server timeouts, graceful shutdown on SIGINT/SIGTERM.
+- `cmd/api` — Gin HTTP server。普通接口使用 30 秒请求上下文；`POST /api/v1/ai/chat` 直接代理 Responses SSE 流并使用独立 90 秒预算。
 - `cmd/worker` — Redis Streams consumer that calls the AI API. Builds `ai.NewResponsesParser` itself and assigns it onto the `ServiceContext` (the API process leaves `Parser` nil).
 
 Request flow is a fixed four-layer chain:
@@ -97,7 +97,7 @@ YAML is the base (`etc/taskpilot-api.yaml`, gitignored; `.example.yaml` variants
 
 Nothing auto-loads `.env` — neither the Go process nor the Makefile. Source it explicitly (`set -a; . ./.env; set +a`).
 
-Production splits secrets: `.env.prod` for app/database/auth, `.env.worker.prod` for `TASKPILOT_AI_API_KEY` and AI settings.
+Production splits secrets: `.env.prod` for app/database/auth, `.env.worker.prod` for `TASKPILOT_AI_API_KEY` and AI settings；该 AI 文件同时注入 API 与 Worker，API 缺失 Key 时仅聊天能力降级。
 
 ## Deployment
 
