@@ -25,10 +25,33 @@ func TestResponsesParserUsesStrictSchemaAndParsesOutput(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
+		if payload["stream"] != true {
+			t.Fatalf("stream = %#v, want true", payload["stream"])
+		}
 		textConfig := payload["text"].(map[string]any)
 		format := textConfig["format"].(map[string]any)
 		if format["type"] != "json_schema" || format["strict"] != true {
 			t.Fatalf("format = %#v", format)
+		}
+		// input 必须是消息数组：网关（如 SoruxGPT）不接受字符串形式。
+		input, ok := payload["input"].([]any)
+		if !ok || len(input) != 1 {
+			t.Fatalf("input = %#v, want a single-element list", payload["input"])
+		}
+		message, ok := input[0].(map[string]any)
+		if !ok || message["role"] != "user" {
+			t.Fatalf("input[0] = %#v, want a user message", input[0])
+		}
+		content, ok := message["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("input[0].content = %#v, want a single-element list", message["content"])
+		}
+		part, ok := content[0].(map[string]any)
+		if !ok || part["type"] != "input_text" {
+			t.Fatalf("input[0].content[0] = %#v, want an input_text part", content[0])
+		}
+		if !strings.Contains(part["text"].(string), "请于 7 月 30 日提交说明书") {
+			t.Fatalf("input text = %#v, want it to contain the document", part["text"])
 		}
 		writeResponsesOutput(t, writer, validStructuredOutput())
 	}))
@@ -74,6 +97,25 @@ func TestResponsesParserRetriesInvalidStructuredOutput(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("calls = %d, want 2", calls.Load())
+	}
+}
+
+func TestResponsesParserAssemblesMultipleOutputDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writeResponsesOutputChunks(t, writer, validStructuredOutput()[:40], validStructuredOutput()[40:])
+	}))
+	defer server.Close()
+
+	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.4", time.Second, 8000)
+	if err != nil {
+		t.Fatalf("NewResponsesParser() error = %v", err)
+	}
+	parsed, err := parser.Parse(context.Background(), "document")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if parsed.Title != "比赛要求" {
+		t.Fatalf("parsed.Title = %q, want 比赛要求", parsed.Title)
 	}
 }
 
@@ -137,18 +179,26 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 
 func writeResponsesOutput(t *testing.T, writer http.ResponseWriter, output string) {
 	t.Helper()
-	writer.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(writer).Encode(map[string]any{
-		"output": []any{map[string]any{
-			"type": "message",
-			"content": []any{map[string]any{
-				"type": "output_text",
-				"text": output,
-			}},
-		}},
-	}); err != nil {
-		t.Fatalf("encode response: %v", err)
+	writeResponsesOutputChunks(t, writer, output)
+}
+
+func writeResponsesOutputChunks(t *testing.T, writer http.ResponseWriter, chunks ...string) {
+	t.Helper()
+	writer.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := writer.(http.Flusher)
+	writeSSEEvent := func(event map[string]any) {
+		data, _ := json.Marshal(event)
+		writer.Write([]byte("data: "))
+		writer.Write(data)
+		writer.Write([]byte("\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
 	}
+	for _, chunk := range chunks {
+		writeSSEEvent(map[string]any{"type": "response.output_text.delta", "delta": chunk})
+	}
+	writeSSEEvent(map[string]any{"type": "response.completed"})
 }
 
 func validStructuredOutput() string {
