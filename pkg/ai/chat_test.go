@@ -69,3 +69,20 @@ func TestResponsesChatClientRejectsInvalidEvent(t *testing.T) {
 		t.Fatalf("Stream() error = %v, want invalid response", err)
 	}
 }
+
+func TestResponsesChatClientIncludesUpstreamErrorMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(writer, `{"error":{"message":"Input must be a list"}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewResponsesChatClient(server.URL, "test-key", "test-model", time.Second, 2000)
+	if err != nil {
+		t.Fatalf("NewResponsesChatClient() error = %v", err)
+	}
+	_, err = client.Stream(context.Background(), ChatRequest{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Input must be a list") {
+		t.Fatalf("Stream() error = %v, want upstream error message", err)
+	}
+}

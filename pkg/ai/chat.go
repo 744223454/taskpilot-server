@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -108,79 +107,11 @@ func (client *ResponsesChatClient) Stream(ctx context.Context, chatRequest ChatR
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
-		return "", &ResponseError{StatusCode: response.StatusCode}
+		message := readAPIErrorMessage(io.LimitReader(response.Body, 4096))
+		return "", &ResponseError{StatusCode: response.StatusCode, Message: message}
 	}
 
 	return consumeResponsesStream(streamContext, response.Body, onDelta)
-}
-
-func consumeResponsesStream(ctx context.Context, body io.Reader, onDelta func(string) error) (string, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), maxResponseBytes)
-	finishReason := "stop"
-	completed := false
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		default:
-		}
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			continue
-		}
-		var event struct {
-			Type     string `json:"type"`
-			Delta    string `json:"delta"`
-			Message  string `json:"message"`
-			Response *struct {
-				Status string `json:"status"`
-				Error  *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			} `json:"response"`
-		}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			return "", fmt.Errorf("%w: decode streaming event", ErrInvalidResponse)
-		}
-		switch event.Type {
-		case "response.output_text.delta", "output_text.delta":
-			if event.Delta != "" && onDelta != nil {
-				if err := onDelta(event.Delta); err != nil {
-					return "", err
-				}
-			}
-		case "response.completed", "response.done":
-			completed = true
-			if event.Response != nil && event.Response.Status != "" {
-				finishReason = event.Response.Status
-			}
-		case "response.failed", "response.incomplete", "error":
-			message := event.Message
-			if event.Response != nil && event.Response.Error != nil && event.Response.Error.Message != "" {
-				message = event.Response.Error.Message
-			}
-			if message == "" {
-				message = "AI streaming response failed"
-			}
-			return "", fmt.Errorf("%w: %s", ErrInvalidResponse, message)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", fmt.Errorf("read AI chat stream: %w", err)
-	}
-	if !completed {
-		return "", fmt.Errorf("%w: streaming response ended before completion", ErrInvalidResponse)
-	}
-	return finishReason, nil
 }
 
 func PublicChatErrorMessage(err error) string {
