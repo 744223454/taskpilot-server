@@ -33,7 +33,7 @@ CORS:
 AI:
   BaseURL: "https://ai.soruxgpt.com/v1"
   APIKey: ""
-  Model: "gpt-5.4"
+  Model: "gpt-5.6-terra"
   RequestTimeout: 180
   MaxOutputTokens: 8000
   ChatRequestTimeout: 90

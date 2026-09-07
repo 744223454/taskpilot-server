@@ -139,7 +139,7 @@ func Load(path string) (Config, error) {
 		cfg.AI.BaseURL = "https://ai.soruxgpt.com/v1"
 	}
 	if cfg.AI.Model == "" {
-		cfg.AI.Model = "gpt-5.4"
+		cfg.AI.Model = "gpt-5.6-terra"
 	}
 	if cfg.AI.RequestTimeout == 0 {
 		cfg.AI.RequestTimeout = 180
