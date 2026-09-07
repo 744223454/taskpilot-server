@@ -57,7 +57,7 @@ func TestResponsesParserUsesStrictSchemaAndParsesOutput(t *testing.T) {
 	}))
 	defer server.Close()
 
-	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.4", time.Second, 8000)
+	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.6-terra", time.Second, 8000)
 	if err != nil {
 		t.Fatalf("NewResponsesParser() error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestResponsesParserUsesStrictSchemaAndParsesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	if parsed.Title != "比赛要求" || parsed.Model != "gpt-5.4" || len(parsed.GeneratedTasks) != 1 {
+	if parsed.Title != "比赛要求" || parsed.Model != "gpt-5.6-terra" || len(parsed.GeneratedTasks) != 1 {
 		t.Fatalf("parsed = %#v", parsed)
 	}
 	if parsed.Deadline == nil || parsed.Deadline.Format(time.RFC3339) != "2026-07-30T23:59:59+08:00" {
@@ -87,7 +87,7 @@ func TestResponsesParserRetriesInvalidStructuredOutput(t *testing.T) {
 	}))
 	defer server.Close()
 
-	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.4", time.Second, 8000)
+	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.6-terra", time.Second, 8000)
 	if err != nil {
 		t.Fatalf("NewResponsesParser() error = %v", err)
 	}
@@ -106,7 +106,7 @@ func TestResponsesParserAssemblesMultipleOutputDeltas(t *testing.T) {
 	}))
 	defer server.Close()
 
-	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.4", time.Second, 8000)
+	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.6-terra", time.Second, 8000)
 	if err != nil {
 		t.Fatalf("NewResponsesParser() error = %v", err)
 	}
@@ -127,7 +127,7 @@ func TestResponsesParserDoesNotRetryAuthenticationFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.4", time.Second, 8000)
+	parser, err := NewResponsesParser(server.URL, "test-key", "gpt-5.6-terra", time.Second, 8000)
 	if err != nil {
 		t.Fatalf("NewResponsesParser() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func TestResponsesParserDoesNotRetryAuthenticationFailure(t *testing.T) {
 
 func TestResponsesParserTimeoutCoversAllAttempts(t *testing.T) {
 	var calls atomic.Int32
-	parser, err := NewResponsesParser("https://example.com/v1", "test-key", "gpt-5.4", 20*time.Millisecond, 8000)
+	parser, err := NewResponsesParser("https://example.com/v1", "test-key", "gpt-5.6-terra", 20*time.Millisecond, 8000)
 	if err != nil {
 		t.Fatalf("NewResponsesParser() error = %v", err)
 	}

@@ -66,7 +66,7 @@ Worker 与 API 流式答疑共享的 AI 敏感配置放在不提交的 `.env.wor
 
 - `TASKPILOT_AI_API_KEY`
 - `TASKPILOT_AI_BASE_URL`，默认 `https://ai.soruxgpt.com/v1`
-- `TASKPILOT_AI_MODEL`，默认 `gpt-5.4`
+- `TASKPILOT_AI_MODEL`，默认 `gpt-5.6-terra`
 - `TASKPILOT_AI_REQUEST_TIMEOUT`，默认整次解析 `180` 秒
 - `TASKPILOT_AI_MAX_OUTPUT_TOKENS`，默认 `8000`
 - `TASKPILOT_AI_CHAT_REQUEST_TIMEOUT`，默认单次答疑 `90` 秒
