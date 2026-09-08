@@ -46,6 +46,7 @@ fi
 
 COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-taskpilot-dev-server}
 POSTGRES_CONTAINER=${POSTGRES_CONTAINER:-taskpilot-postgres}
+REDIS_CONTAINER=${REDIS_CONTAINER:-taskpilot-dev-redis}
 POSTGRES_USER=${POSTGRES_USER:-taskpilot}
 POSTGRES_DB=${POSTGRES_DB:-taskpilot_dev}
 
@@ -79,6 +80,18 @@ wait_for_postgres() {
 	done
 }
 
+wait_for_redis() {
+	attempts=0
+	until docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null | grep -q PONG; do
+		attempts=$((attempts + 1))
+		if [ "$attempts" -ge 60 ]; then
+			echo "redis container $REDIS_CONTAINER did not become ready in time"
+			exit 1
+		fi
+		sleep 2
+	done
+}
+
 apply_incremental_migrations() {
 	echo "applying incremental database migrations to $POSTGRES_DB via $POSTGRES_CONTAINER"
 	docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
@@ -95,7 +108,7 @@ wait_for_application() {
 	attempts=0
 	until compose exec -T app wget -q -O /dev/null http://127.0.0.1:8888/readyz; do
 		attempts=$((attempts + 1))
-		if [ "$attempts" -ge 30 ]; then
+		if [ "$attempts" -ge 90 ]; then
 			echo "application did not become ready in time"
 			compose logs app worker
 			exit 1
@@ -108,6 +121,7 @@ compose config --quiet
 compose build app
 remove_legacy_containers
 compose up -d redis
+wait_for_redis
 wait_for_postgres
 apply_incremental_migrations
 compose up -d app worker
