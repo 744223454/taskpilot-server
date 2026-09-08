@@ -18,6 +18,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	redisPingInterval = 2 * time.Second
+	redisPingTimeout  = time.Minute
+)
+
 type ServiceContext struct {
 	Config          config.Config
 	DB              *gorm.DB
@@ -77,12 +82,29 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	serverContext.AuthRateLimiter = cachepkg.NewAuthRateLimiter(redisClient)
 	serverContext.AIChatGuard = cachepkg.NewAIChatGuard(redisClient)
 	serverContext.ParseJobs = cachepkg.NewParseJobQueue(redisClient, c.Worker.StreamKey, c.Worker.ConsumerGroup)
-	pingContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := redisClient.Ping(pingContext).Err(); err != nil {
-		logger.Warn("redis initialization failed", "error", err)
-	}
+	waitUntilRedisReady(redisClient, logger)
 	return serverContext
+}
+
+// waitUntilRedisReady pings until the server answers (or the deadline
+// passes) so an AOF-loading Redis after a host reboot does not leave the
+// process degraded. A failure is non-fatal: the client reconnects lazily.
+func waitUntilRedisReady(client *redis.Client, logger *slog.Logger) {
+	deadline := time.Now().Add(redisPingTimeout)
+	for {
+		pingContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := client.Ping(pingContext).Err()
+		cancel()
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			logger.Warn("redis initialization failed", "error", err)
+			return
+		}
+		logger.Warn("redis not ready, retrying", "error", err, "retry_in", redisPingInterval.String())
+		time.Sleep(redisPingInterval)
+	}
 }
 
 func (s *ServiceContext) Close() error {

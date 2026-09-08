@@ -18,7 +18,7 @@ services:
       - taskpilot_uploads:/app/uploads
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
     networks:
       - taskpilot_dev_net
       - taskpilot_prod_net
